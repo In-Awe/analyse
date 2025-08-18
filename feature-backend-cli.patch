@@ -1,0 +1,691 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,9 @@
++# general
++.DS_Store
++__pycache__/
++*.pyc
++
++# secrets and env
++.env
++backend/config.env
++
++# model checkpoints
++backend/model/checkpoints/
+diff --git a/.github/workflows/python-ci.yml b/.github/workflows/python-ci.yml
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/.github/workflows/python-ci.yml
+@@ -0,0 +1,48 @@
++name: Python CI
++on: [push, pull_request]
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    strategy:
++      matrix:
++        python-version: [3.9]
++    steps:
++      - uses: actions/checkout@v4
++      - name: Set up Python
++        uses: actions/setup-python@v4
++        with:
++          python-version: ${{ matrix.python-version }}
++      - name: Install dependencies
++        run: |
++          python -m pip install --upgrade pip
++          pip install -r backend/requirements.txt
++      - name: Run tests
++        run: pytest backend/tests -q
++
+diff --git a/backend/README.md b/backend/README.md
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/backend/README.md
+@@ -0,0 +1,160 @@
++Backend for LLM trading assistant
++=================================
++
++This folder contains a Python CLI and supporting modules to:
++
++- ingest Binance CSVs
++- compute technical indicators
++- run local LLM inference (quantised when possible)
++- run a toy LoRA training job
++- fetch historical klines from Binance
++- run a naive backtest
++
++Quickstart (macOS)
++------------------
++
++1. Create and activate a virtual environment
++
++```bash
++cd backend
++python3 -m venv .venv
++source .venv/bin/activate
++python -m pip install --upgrade pip setuptools wheel
++pip install -r requirements.txt
++```
++
++2. Set environment variables (use `backend/config.example.env` as a template)
++
++```bash
++export BINANCE_API_KEY=...
++export BINANCE_API_SECRET=...
++export MODEL_REPO=meta-llama/Llama-2-7b-chat-hf
++```
++
++3. Run CLI examples
++
++```bash
++# ingest a CSV and print a summary
++python cli.py ingest --path /mnt/data/BTCUSDT_1m_January_2025.csv
++
++# analyse last 60 rows using the local model
++python cli.py analyze --path /mnt/data/BTCUSDT_1m_January_2025.csv --lookback 60
++
++# fetch historical data from Binance and save to CSV
++python cli.py fetch --symbol BTCUSDT --start 2025-01-01 --end 2025-02-01 --out-csv btc_jan.csv
++
++# run a toy LoRA training job
++python cli.py train --dataset backend/samples/toy_train.json --output-dir backend/model/checkpoints
++```
++
++Notes
++-----
++
++- If you are on Apple Silicon, make sure PyTorch MPS support is installed. Check with:
++  `python -c "import torch; print(torch.backends.mps.is_available())"`.
++- bitsandbytes can be problematic to install on macOS. If installation fails, use CPU fallback. See `backend/model/infer.py` for graceful fallback logic.
++- Do not commit real API keys. Use `backend/config.example.env` and a local `.env` file or environment variables.
++
++Project layout
++--------------
++
++```
++backend/
++├─ README.md
++├─ requirements.txt
++├─ config.example.env
++├─ cli.py
++├─ data/
++│  ├─ __init__.py
++│  ├─ loader.py
++│  └─ features.py
++├─ binance_client.py
++├─ model/
++│  ├─ __init__.py
++│  ├─ infer.py
++│  └─ lora_train.py
++├─ backtest/
++│  ├─ __init__.py
++│  ├─ engine.py
++│  └─ metrics.py
++└─ tests/
++   ├─ test_loader.py
++   └─ test_binance_client.py
++```
++
++If you want a full patch applied automatically, use the accompanying git patch.
++
+diff --git a/backend/requirements.txt b/backend/requirements.txt
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/backend/requirements.txt
+@@ -0,0 +1,24 @@
++typer[all]==0.9.0
++pandas==2.2.0
++numpy==1.26.0
++pandas-ta==0.3.0b0
++python-binance==1.0.16
++transformers==4.34.0
++accelerate==0.22.0
++peft==0.4.0
++bitsandbytes==0.39.0
++torch==2.2.0
++torchaudio==2.2.0
++pytest==7.4.0
++rich==13.6.0
++python-dotenv==1.0.0
++faiss-cpu==1.7.4
++
++# notes: bitsandbytes and torch versions change frequently. If install fails on macOS, use CPU fallback.
+diff --git a/backend/config.example.env b/backend/config.example.env
+new file mode 100644
+index 0000000..5555555
+--- /dev/null
++++ b/backend/config.example.env
+@@ -0,0 +1,8 @@
++# backend/config.example.env
++BINANCE_API_KEY=
++BINANCE_API_SECRET=
++BINANCE_TESTNET_API_KEY=
++BINANCE_TESTNET_API_SECRET=
++MODEL_REPO=meta-llama/Llama-2-7b-chat-hf
++
+diff --git a/backend/cli.py b/backend/cli.py
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/backend/cli.py
+@@ -0,0 +1,123 @@
++#!/usr/bin/env python3
++"""
++backend/cli.py
++Entry point for the CLI using Typer.
++"""
++import os
++import typer
++from rich import print
++
++from backend.data.loader import load_csv, df_to_context
++from backend.binance_client import BinanceClient
++from backend.model.infer import analyse_series
++from backend.model.lora_train import train_lora
++
++app = typer.Typer(help="CLI for LLM trading assistant")
++
++
++@app.command()
++def ingest(path: str):
++    """
++    Load a CSV and print basic info
++    """
++    df = load_csv(path)
++    print(f"[green]Loaded[/green] {len(df)} rows from {path}")
++    print(df.tail(3).to_string())
++
++
++@app.command()
++def analyze(path: str, lookback: int = 60):
++    """
++    Analyse last N rows using local LLM
++    """
++    df = load_csv(path)
++    context = df_to_context(df, lookback)
++    out = analyse_series(context)
++    print(out)
++
++
++@app.command()
++def fetch(symbol: str, start: str, end: str, out_csv: str = "fetched.csv"):
++    """
++    Fetch historical klines from Binance and save to CSV
++    """
++    client = BinanceClient()
++    df = client.get_historical_klines(symbol, start, end)
++    df.to_csv(out_csv, index=False)
++    print(f"[green]Saved[/green] {len(df)} rows to {out_csv}")
++
++
++@app.command()
++def train(dataset: str = "backend/samples/toy_train.json", output_dir: str = "backend/model/checkpoints"):
++    """
++    Run a toy LoRA training job for proof of concept
++    """
++    train_lora(dataset, output_dir)
++    print("[green]LoRA training finished (toy run)[/green]")
++
++
++if __name__ == "__main__":
++    app()
+diff --git a/backend/data/__init__.py b/backend/data/__init__.py
+new file mode 100644
+index 0000000..7777777
+--- /dev/null
++++ b/backend/data/__init__.py
+@@ -0,0 +1,2 @@
++# data package
++__all__ = ["loader", "features"]
+diff --git a/backend/data/loader.py b/backend/data/loader.py
+new file mode 100644
+index 0000000..8888888
+--- /dev/null
++++ b/backend/data/loader.py
+@@ -0,0 +1,94 @@
++import pandas as pd
++from .features import add_indicators
++
++def load_csv(path: str) -> pd.DataFrame:
++    """
++    Expect CSV with at least: timestamp, open, high, low, close, volume
++    Timestamps will be parsed to pandas datetime
++    """
++    df = pd.read_csv(path)
++    # support common column variants
++    if 'timestamp' not in df.columns and 'open_time' in df.columns:
++        df = df.rename(columns={'open_time':'timestamp'})
++    if 'timestamp' in df.columns:
++        df['timestamp'] = pd.to_datetime(df['timestamp'])
++    else:
++        # attempt epoch ms fallback
++        if 'open_time' in df.columns:
++            df['timestamp'] = pd.to_datetime(df['open_time'], unit='ms')
++        else:
++            raise ValueError("CSV missing timestamp or open_time")
++    df = df.sort_values('timestamp').reset_index(drop=True)
++    # coerce numeric columns
++    for c in ['open','high','low','close','volume']:
++        if c in df.columns:
++            df[c] = pd.to_numeric(df[c], errors='coerce')
++    df = add_indicators(df)
++    return df
++
++def df_to_context(df: pd.DataFrame, lookback: int = 60) -> list:
++    """
++    Return last `lookback` rows as list of dicts for the prompt builder
++    """
++    recent = df.tail(lookback).copy()
++    cols = ['timestamp','open','high','low','close','volume','rsi','ema_50','ema_200']
++    available = [c for c in cols if c in recent.columns]
++    records = recent[available].to_dict('records')
++    return records
+diff --git a/backend/data/features.py b/backend/data/features.py
+new file mode 100644
+index 0000000..9999999
+--- /dev/null
++++ b/backend/data/features.py
+@@ -0,0 +1,36 @@
++import pandas as pd
++import pandas_ta as ta
++
++def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
++    """
++    Add simple indicators: RSI(14), EMA50, EMA200
++    If pandas_ta fails, leave NaN values.
++    """
++    if 'close' not in df.columns:
++        return df
++    try:
++        df['rsi'] = ta.rsi(df['close'], length=14)
++        df['ema_50'] = ta.ema(df['close'], length=50)
++        df['ema_200'] = ta.ema(df['close'], length=200)
++    except Exception:
++        df['rsi'] = pd.NA
++        df['ema_50'] = pd.NA
++        df['ema_200'] = pd.NA
++    return df
++
+diff --git a/backend/binance_client.py b/backend/binance_client.py
+new file mode 100644
+index 0000000..aaaaaaaa
+--- /dev/null
++++ b/backend/binance_client.py
+@@ -0,0 +1,83 @@
++import os
++import pandas as pd
++from binance.client import Client
++
++class BinanceClient:
++    def __init__(self, api_key=None, api_secret=None, testnet=False):
++        api_key = api_key or os.getenv("BINANCE_API_KEY")
++        api_secret = api_secret or os.getenv("BINANCE_API_SECRET")
++        if testnet:
++            api_key = api_key or os.getenv("BINANCE_TESTNET_API_KEY")
++            api_secret = api_secret or os.getenv("BINANCE_TESTNET_API_SECRET")
++        # Client will accept None for public endpoints, but for private calls keys are required
++        self.client = Client(api_key, api_secret)
++
++    def get_historical_klines(self, symbol, start_str, end_str, interval='1m') -> pd.DataFrame:
++        """
++        Returns a DataFrame with columns timestamp, open, high, low, close, volume
++        start_str and end_str are strings like '2024-11-01' or '1 day ago UTC'
++        """
++        raw = self.client.get_historical_klines(symbol, interval, start_str, end_str)
++        cols = ['open_time','open','high','low','close','volume','close_time','qav','num_trades','taker_base_vol','taker_quote_vol','ignore']
++        df = pd.DataFrame(raw, columns=cols)
++        df['timestamp'] = pd.to_datetime(df['open_time'], unit='ms')
++        df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].astype(float)
++        return df[['timestamp','open','high','low','close','volume']]
++
++    # Future: implement testnet create_test_order and live order wrappers as needed.
++
+diff --git a/backend/model/__init__.py b/backend/model/__init__.py
+new file mode 100644
+index 0000000..bbbbbbbb
+--- /dev/null
++++ b/backend/model/__init__.py
+@@ -0,0 +1,2 @@
++# model package
++__all__ = ["infer", "lora_train"]
+diff --git a/backend/model/infer.py b/backend/model/infer.py
+new file mode 100644
+index 0000000..cccccccc
+--- /dev/null
++++ b/backend/model/infer.py
+@@ -0,0 +1,122 @@
++import os
++import warnings
++from typing import List, Dict
++
++import torch
++from transformers import AutoTokenizer, AutoModelForCausalLM
++try:
++    from transformers import BitsAndBytesConfig
++except Exception:
++    BitsAndBytesConfig = None
++
++MODEL = os.getenv("MODEL_REPO", "meta-llama/Llama-2-7b-chat-hf")
++
++def load_model():
++    """
++    Attempt to load a quantised model using bitsandbytes. Fallback to CPU model if needed.
++    """
++    try:
++        if BitsAndBytesConfig is not None:
++            # use quantisation config when available
++            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
++            tokenizer = AutoTokenizer.from_pretrained(MODEL)
++            model = AutoModelForCausalLM.from_pretrained(MODEL, device_map='auto', quantization_config=bnb_config)
++            return tokenizer, model
++        else:
++            # bitsandbytes not available, try standard 8-bit argument
++            tokenizer = AutoTokenizer.from_pretrained(MODEL)
++            model = AutoModelForCausalLM.from_pretrained(MODEL, device_map='auto', load_in_8bit=True)
++            return tokenizer, model
++    except Exception as e:
++        warnings.warn(f"8-bit load failed: {e}. Falling back to cpu load.")
++        tokenizer = AutoTokenizer.from_pretrained(MODEL)
++        model = AutoModelForCausalLM.from_pretrained(MODEL, device_map='cpu')
++        return tokenizer, model
++
++def build_prompt(records: List[Dict]) -> str:
++    snippet = ""
++    for r in records[-40:]:
++        t = r.get('timestamp')
++        snippet += f"{t} O:{r.get('open')} H:{r.get('high')} L:{r.get('low')} C:{r.get('close')} V:{r.get('volume')} RSI:{r.get('rsi')} EMA50:{r.get('ema_50')} EMA200:{r.get('ema_200')}\n"
++    prompt = (
++        "You are an assistant specialising in short term crypto price analysis.\n"
++        "Use the supplied timestamped OHLCV and indicators to detect signals: EMA crossovers, RSI boundaries, momentum shifts and candle clusters.\n"
++        "Answer briefly with numbered bullet points: signals, trend, confidence and suggested next step for paper trading.\n\n"
++        f"{snippet}\nAnswer:"
++    )
++    return prompt
++
++def analyse_series(records: List[Dict]) -> str:
++    tokenizer, model = load_model()
++    prompt = build_prompt(records)
++    inputs = tokenizer(prompt, return_tensors='pt', truncation=True)
++    device = next(model.parameters()).device
++    # move inputs to device if not cpu
++    inputs = {k: v.to(device) for k, v in inputs.items()}
++    out = model.generate(**inputs, max_new_tokens=256, do_sample=False)
++    txt = tokenizer.decode(out[0], skip_special_tokens=True)
++    return txt
++
++if __name__ == "__main__":
++    # quick interactive test if run directly
++    import json
++    sample = [
++        {"timestamp":"2025-01-01 00:00","open":100,"high":102,"low":99,"close":101,"volume":1.2,"rsi":45,"ema_50":100,"ema_200":98}
++    ]
++    print(analyse_series(sample))
+diff --git a/backend/model/lora_train.py b/backend/model/lora_train.py
+new file mode 100644
+index 0000000..dddddddd
+--- /dev/null
++++ b/backend/model/lora_train.py
+@@ -0,0 +1,146 @@
++import os
++import json
++import logging
++
++from datasets import load_dataset
++from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
++from peft import LoraConfig, get_peft_model
++
++MODEL = os.getenv("MODEL_REPO", "meta-llama/Llama-2-7b-chat-hf")
++
++logging.basicConfig(level=logging.INFO)
++logger = logging.getLogger(__name__)
++
++def _load_json_dataset(path: str):
++    """
++    Load a simple json file containing a list of {"prompt": "...", "response":"..."} pairs.
++    """
++    return load_dataset('json', data_files=path, split='train')
++
++def train_lora(dataset_path: str, output_dir: str):
++    # dataset: json file with {prompt, response}
++    ds = _load_json_dataset(dataset_path)
++    tokenizer = AutoTokenizer.from_pretrained(MODEL)
++
++    def tokenize_fn(ex):
++        full = ex['prompt'] + "\n" + ex['response']
++        enc = tokenizer(full, truncation=True, max_length=512)
++        enc['labels'] = enc['input_ids'].copy()
++        return enc
++
++    tokenized = ds.map(tokenize_fn, batched=False)
++
++    # load model in 8-bit if possible; Trainer will handle device_map with accelerate
++    try:
++        model = AutoModelForCausalLM.from_pretrained(MODEL, device_map="auto", load_in_8bit=True)
++    except Exception as e:
++        logger.warning(f"8-bit load failed: {e}. Falling back to cpu load.")
++        model = AutoModelForCausalLM.from_pretrained(MODEL, device_map="cpu")
++
++    peft_config = LoraConfig(
++        task_type="CAUSAL_LM",
++        inference_mode=False,
++        r=8,
++        lora_alpha=32,
++        lora_dropout=0.1
++    )
++    model = get_peft_model(model, peft_config)
++
++    training_args = TrainingArguments(
++        per_device_train_batch_size=1,
++        num_train_epochs=1,
++        learning_rate=2e-4,
++        output_dir=output_dir,
++        logging_steps=10,
++        save_total_limit=2,
++        fp16=False
++    )
++
++    trainer = Trainer(
++        model=model,
++        args=training_args,
++        train_dataset=tokenized
++    )
++
++    trainer.train()
++    model.save_pretrained(output_dir)
++    logger.info("Saved LoRA adapter to %s", output_dir)
++
++if __name__ == "__main__":
++    # local quick test: create a tiny dataset if not present
++    sample_path = os.path.join("backend", "samples", "toy_train.json")
++    if not os.path.exists(sample_path):
++        os.makedirs(os.path.dirname(sample_path), exist_ok=True)
++        sample = [
++            {"prompt":"Price sequence: 2025-01-01 O:100 H:102 L:99 C:101 RSI:45 EMA50:100 EMA200:98\nQuestion: What pattern do you see?","response":"Short term uptrend, bullish crossover, RSI neutral. Bias: small buy with stop under 99."}
++        ]
++        with open(sample_path, "w") as fh:
++            json.dump(sample, fh)
++    train_lora(sample_path, "backend/model/checkpoints")
+diff --git a/backend/backtest/__init__.py b/backend/backtest/__init__.py
+new file mode 100644
+index 0000000..eeeeeeee
+--- /dev/null
++++ b/backend/backtest/__init__.py
+@@ -0,0 +1,1 @@
++# backtest package
++__all__ = ["engine", "metrics"]
+diff --git a/backend/backtest/engine.py b/backend/backtest/engine.py
+new file mode 100644
+index 0000000..ffffffff
+--- /dev/null
++++ b/backend/backtest/engine.py
+@@ -0,0 +1,88 @@
++import pandas as pd
++from .metrics import compute_metrics
++
++def simple_ma_rsi_strategy(df: pd.DataFrame):
++    """
++    Example strategy:
++    - Buy when EMA50 crosses above EMA200 and RSI < 70
++    - Sell when EMA50 crosses below EMA200 or RSI > 70
++    This is a naive backtest for demonstration.
++    """
++    df = df.copy().reset_index(drop=True)
++    df['position'] = 0
++    for i in range(1, len(df)):
++        prev = df.loc[i-1]
++        cur = df.loc[i]
++        buy_signal = (prev.get('ema_50') <= prev.get('ema_200')) and (cur.get('ema_50') > cur.get('ema_200')) and (cur.get('rsi') is not None and cur.get('rsi') < 70)
++        sell_signal = ((prev.get('ema_50') >= prev.get('ema_200')) and (cur.get('ema_50') < cur.get('ema_200'))) or (cur.get('rsi') is not None and cur.get('rsi') > 70)
++        if buy_signal:
++            df.at[i, 'position'] = 1
++        elif sell_signal:
++            df.at[i, 'position'] = 0
++        else:
++            df.at[i, 'position'] = df.at[i-1, 'position']
++
++    # compute returns based on close price change
++    df['close_shift'] = df['close'].shift(1)
++    df['strategy_ret'] = 0.0
++    mask = df['close_shift'] != 0
++    df.loc[mask, 'strategy_ret'] = ((df.loc[mask, 'close'] - df.loc[mask, 'close_shift']) / df.loc[mask, 'close_shift']) * df.loc[mask, 'position']
++    return compute_metrics(df['strategy_ret'])
++
++if __name__ == "__main__":
++    import pandas as pd
++    import numpy as np
++    # quick demo
++    df = pd.DataFrame({
++        'close': 100 + (np.arange(200) * 0.1),
++        'ema_50': 100 + (np.arange(200) * 0.09),
++        'ema_200': 100 + (np.arange(200) * 0.05),
++        'rsi': [50]*200
++    })
++    print(simple_ma_rsi_strategy(df))
+diff --git a/backend/backtest/metrics.py b/backend/backtest/metrics.py
+new file mode 100644
+index 0000000..12121212
+--- /dev/null
++++ b/backend/backtest/metrics.py
+@@ -0,0 +1,46 @@
++import pandas as pd
++
++def compute_metrics(returns: pd.Series):
++    """
++    Compute simple performance metrics.
++    returns: a pd.Series of periodic returns (e.g. minute returns)
++    """
++    # total return
++    total_ret = (1 + returns).prod() - 1 if len(returns) > 0 else 0.0
++
++    # approximate annualised return and sharpe for minute data:
++    # periods per day = 1440
++    if len(returns) > 1:
++        avg_ret = returns.mean()
++        std_ret = returns.std(ddof=0) if returns.std(ddof=0) != 0 else 1e-8
++        annual_factor = 1440  # minutes per day used as simple scaler
++        sharpe = (avg_ret * annual_factor) / (std_ret * (annual_factor ** 0.5))
++    else:
++        sharpe = 0.0
++
++    # max drawdown
++    cum = (1 + returns).cumprod()
++    peak = cum.cummax()
++    dd = ((cum - peak) / peak).min() if len(cum) > 0 else 0.0
++
++    return {
++        "total_return": float(total_ret),
++        "sharpe": float(sharpe),
++        "max_drawdown": float(dd)
++    }
++
+diff --git a/backend/tests/test_loader.py b/backend/tests/test_loader.py
+new file mode 100644
+index 0000000..34343434
+--- /dev/null
++++ b/backend/tests/test_loader.py
+@@ -0,0 +1,54 @@
++import os
++from backend.data.loader import load_csv
++
++def test_load_sample(tmp_path):
++    path = tmp_path / "sample_minute.csv"
++    import pandas as pd
++    import numpy as np
++    df = pd.DataFrame({
++        'timestamp': pd.date_range('2025-01-01', periods=10, freq='T'),
++        'open': (100 + np.arange(10)).astype(float),
++        'high': (101 + np.arange(10)).astype(float),
++        'low': (99 + np.arange(10)).astype(float),
++        'close': (100.5 + np.arange(10)).astype(float),
++        'volume': (1.0 + np.random.rand(10))
++    })
++    df.to_csv(path, index=False)
++    df_loaded = load_csv(str(path))
++    assert 'rsi' in df_loaded.columns
++    assert len(df_loaded) == 10
++
+diff --git a/backend/tests/test_binance_client.py b/backend/tests/test_binance_client.py
+new file mode 100644
+index 0000000..45454545
+--- /dev/null
++++ b/backend/tests/test_binance_client.py
+@@ -0,0 +1,24 @@
++from backend.binance_client import BinanceClient
++
++def test_binance_client_init():
++    c = BinanceClient(api_key=None, api_secret=None)
++    assert c is not None
++
++def test_get_historical_klines_public_call():
++    """
++    This test does not call the network. It verifies the method can be accessed.
++    For an integration test, supply real API keys and run manually.
++    """
++    c = BinanceClient(api_key=None, api_secret=None)
++    assert hasattr(c, "get_historical_klines")
++
+diff --git a/backend/samples/toy_train.json b/backend/samples/toy_train.json
+new file mode 100644
+index 0000000..56565656
+--- /dev/null
++++ b/backend/samples/toy_train.json
+@@ -0,0 +1,6 @@
++[
++  {"prompt":"Price sequence: 2025-01-01 O:100 H:102 L:99 C:101 RSI:45 EMA50:100 EMA200:98\nQuestion: What pattern do you see?","response":"Short term uptrend, bullish crossover, RSI neutral. Bias: small buy with stop under 99."},
++  {"prompt":"Price sequence: 2025-01-02 O:120 H:121 L:118 C:119 RSI:78 EMA50:110 EMA200:115\nQuestion: What pattern do you see?","response":"Overbought on RSI with price above EMAs. Risk of pullback. Consider taking profit."}
++]
++
+diff --git a/backend/samples/prompt_templates.md b/backend/samples/prompt_templates.md
+new file mode 100644
+index 0000000..67676767
+--- /dev/null
++++ b/backend/samples/prompt_templates.md
+@@ -0,0 +1,36 @@
++System instruction:
++You are an assistant specialised in short term crypto price analysis. Use the supplied table of timestamped OHLCV rows and indicators to detect common signals: EMA crossovers, RSI >70 or <30, momentum shifts and candle clusters. Answer briefly and list signals and confidence.
++
++User prompt:
++{series_snippet}
++
++Answer:
++1. Signals:
++2. Trend:
++3. Confidence (low/medium/high):
++4. Suggested next step (paper trading only):
++
++Use concise bullet points and do not hallucinate numerical facts not present in the snippet.
++
+diff --git a/backend/model/checkpoints/.gitkeep b/backend/model/checkpoints/.gitkeep
+new file mode 100644
+index 0000000..78787878
+--- /dev/null
++++ b/backend/model/checkpoints/.gitkeep
+@@ -0,0 +1 @@
++# placeholder to keep checkpoints directory in git if desired
