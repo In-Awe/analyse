@@ -27,7 +27,12 @@ def prepare_data(df: pd.DataFrame, target_col: str):
     X = df.drop(columns=[target_col])
     X = X.select_dtypes(include=[np.number]).fillna(0)
     y = df[target_col].astype(int)
-    return X, y
+    # map labels to 0..K-1 for XGBoost
+    unique_labels = sorted(list(pd.unique(y)))
+    label_to_enc = {lab: i for i, lab in enumerate(unique_labels)}
+    enc_to_label = {v: k for k, v in label_to_enc.items()}
+    y_enc = y.map(label_to_enc).values
+    return X, y_enc, label_to_enc, enc_to_label
 
 def metrics(y_true, y_pred, probs=None):
     m = {}
@@ -59,18 +64,19 @@ def main(argv=None):
             if "next_" in c and c.endswith("dir"):
                 args.target = c
                 break
-    X, y = prepare_data(df, args.target)
+    X, y_enc, label_to_enc, enc_to_label = prepare_data(df, args.target)
     n = len(X)
     train_end = int(0.70 * n)
     val_end = int(0.85 * n)
-    X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
-    X_val, y_val = X.iloc[train_end:val_end], y.iloc[train_end:val_end]
+    X_train, y_train = X.iloc[:train_end], y_enc[:train_end]
+    X_val, y_val = X.iloc[train_end:val_end], y_enc[train_end:val_end]
 
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dval = xgb.DMatrix(X_val, label=y_val)
+    num_class = len(np.unique(y_enc))
     params = {
-        "objective": "multi:softprob",
-        "num_class": len(np.unique(y)),
+        "objective": "multi:softprob" if num_class>2 else "binary:logistic",
+        "num_class": num_class,
         "eval_metric": "mlogloss",
         "eta": 0.05,
         "max_depth": 6,
@@ -82,12 +88,24 @@ def main(argv=None):
     evallist = [(dtrain, "train"), (dval, "eval")]
     bst = xgb.train(params, dtrain, num_boost_round=args.nrounds, evals=evallist, early_stopping_rounds=args.early_stopping_rounds)
     preds_prob = bst.predict(dval)
-    preds = np.argmax(preds_prob, axis=1)
-    m = metrics(y_val, preds, preds_prob)
+    if preds_prob.ndim == 2:
+        preds_enc = np.argmax(preds_prob, axis=1)
+    else:
+        # binary returns probability for positive class
+        preds_enc = (preds_prob > 0.5).astype(int)
+    # decode predictions to original labels for metrics
+    preds = np.array([enc_to_label[int(p)] for p in preds_enc])
+    y_val_decoded = np.array([enc_to_label[int(p)] for p in y_val])
+    m = metrics(y_val_decoded, preds, preds_prob if preds_prob.ndim==2 else None)
     # save bst and feature names
     bst.save_model(str(outdir / "xgb_model.json"))
-    # store metadata
-    meta = {"feature_names": X.columns.tolist(), "best_ntree_limit": getattr(bst, "best_ntree_limit", None)}
+    # store metadata and label mapping
+    meta = {
+        "feature_names": X.columns.tolist(),
+        "best_ntree_limit": getattr(bst, "best_ntree_limit", None),
+        "label_to_enc": {int(k): int(v) for k, v in label_to_enc.items()},
+        "enc_to_label": {int(k): int(v) for k, v in enc_to_label.items()},
+    }
     with open(outdir / "xgb_meta.json", "w") as f:
         json.dump(meta, f, indent=2)
     with open(outdir / "xgb_metrics.json", "w") as f:

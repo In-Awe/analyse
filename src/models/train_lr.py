@@ -25,7 +25,12 @@ def prepare_Xy(df: pd.DataFrame, target_col: str, drop_cols=None):
     X = df.drop(columns=[c for c in drop_cols if c in df.columns] + [target_col], errors='ignore')
     X = X.select_dtypes(include=[np.number]).fillna(0)
     y = df[target_col].astype(int)
-    return X, y
+    # encode labels to 0..K-1 for consistency across models
+    unique_labels = sorted(list(pd.unique(y)))
+    label_to_enc = {lab: i for i, lab in enumerate(unique_labels)}
+    enc_to_label = {v: k for k, v in label_to_enc.items()}
+    y_enc = y.map(label_to_enc)
+    return X, y_enc, label_to_enc, enc_to_label
 
 def train_lr(X_train, y_train, X_val, y_val, seed=42):
     scaler = StandardScaler()
@@ -70,18 +75,21 @@ def main(argv=None):
             if "next_" in c and c.endswith("dir"):
                 args.target = c
                 break
-    X, y = prepare_Xy(df, args.target)
+    X, y_enc, label_to_enc, enc_to_label = prepare_Xy(df, args.target)
     # simple time split: first 70% train, next 15% val
     n = len(X)
     train_end = int(0.70 * n)
     val_end = int(0.85 * n)
-    X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
-    X_val, y_val = X.iloc[train_end:val_end], y.iloc[train_end:val_end]
+    X_train, y_train = X.iloc[:train_end], y_enc.iloc[:train_end]
+    X_val, y_val = X.iloc[train_end:val_end], y_enc.iloc[train_end:val_end]
 
-    clf, scaler, preds, probs = train_lr(X_train, y_train, X_val, y_val)
-    m = metrics(y_val, preds, probs)
+    clf, scaler, preds_enc, probs = train_lr(X_train, y_train, X_val, y_val)
+    # decode predictions back to original labels
+    preds = np.array([enc_to_label[int(p)] for p in preds_enc])
+    y_val_decoded = np.array([enc_to_label[int(p)] for p in y_val])
+    m = metrics(y_val_decoded, preds, probs if probs is not None else None)
     # save artifacts
-    joblib.dump({"model": clf, "scaler": scaler}, outdir / "lr_artifact.joblib")
+    joblib.dump({"model": clf, "scaler": scaler, "label_to_enc": label_to_enc, "enc_to_label": enc_to_label}, outdir / "lr_artifact.joblib")
     with open(outdir / "lr_metrics.json", "w") as f:
         json.dump(m, f, indent=2)
     print(f"[lr] saved model to {outdir} metrics={m}")
