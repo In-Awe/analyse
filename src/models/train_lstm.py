@@ -55,7 +55,12 @@ def build_sequences(df: pd.DataFrame, target_col: str, seq_len: int, drop_cols=N
     X = df.drop(columns=[c for c in drop_cols if c in df.columns] + [target_col], errors='ignore')
     X = X.select_dtypes(include=[np.number]).fillna(0).values
     y = df[target_col].values.astype(int)
-    return X, y
+    # encode labels
+    unique_labels = sorted(list(pd.unique(df[target_col].astype(int))))
+    label_to_enc = {lab: i for i, lab in enumerate(unique_labels)}
+    enc_to_label = {v: k for k, v in label_to_enc.items()}
+    y_enc = np.array([label_to_enc[int(v)] for v in y])
+    return X, y_enc, label_to_enc, enc_to_label
 
 def compute_metrics(y_true, y_pred):
     m = {}
@@ -109,7 +114,7 @@ def main(argv=None):
             if "next_" in c and c.endswith("dir"):
                 args.target = c
                 break
-    X, y = build_sequences(df, args.target, args.seq_len)
+    X, y, label_to_enc, enc_to_label = build_sequences(df, args.target, args.seq_len)
     # simple time-split
     n = len(X)
     train_end = int(0.70 * n)
@@ -140,6 +145,12 @@ def main(argv=None):
     # save scaler via joblib
     import joblib
     joblib.dump(scaler, outdir / "lstm_scaler.joblib")
+    # save label mapping
+    import json
+    with open(outdir / "label_mapping.json", "w") as f:
+        label_to_enc_json = {int(k): int(v) for k, v in label_to_enc.items()}
+        enc_to_label_json = {int(k): int(v) for k, v in enc_to_label.items()}
+        json.dump({"label_to_enc": label_to_enc_json, "enc_to_label": enc_to_label_json}, f, indent=2)
     with open(outdir / "lstm_metrics.json", "w") as f:
         json.dump(final_metrics, f, indent=2)
     print(f"[lstm] saved model to {outdir} metrics={final_metrics}")

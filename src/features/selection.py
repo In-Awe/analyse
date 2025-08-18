@@ -31,18 +31,30 @@ def correlation_prune(df: pd.DataFrame, thresh: float=0.95) -> List[str]:
     return keep
 
 def xgboost_importance(df: pd.DataFrame, target_col: str, top_k: int=50, random_state: int=42) -> List[str]:
+    """
+    Compute feature importance using XGBoost and support multiclass targets.
+    Returns top_k feature names ranked by gain.
+    """
     data = df.copy()
     # drop timestamp if exists
     if "timestamp" in data.columns:
         data = data.drop(columns=["timestamp"])
     X = data.drop(columns=[target_col])
-    y = data[target_col]
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+    y = data[target_col].astype(int)
+    # encode labels to 0..K-1 internally
+    unique_labels = sorted(list(pd.unique(y)))
+    label_to_enc = {lab: i for i, lab in enumerate(unique_labels)}
+    y_enc = y.map(label_to_enc).values
+    X_train, X_test, y_train, y_test = train_test_split(X, y_enc, test_size=0.2, shuffle=False)
     dtrain = xgb.DMatrix(X_train.fillna(0), label=y_train)
-    params = {"objective": "binary:logistic", "eval_metric": "auc", "verbosity": 0}
-    model = xgb.train(params, dtrain, num_boost_round=100)
+    num_class = len(unique_labels)
+    if num_class <= 2:
+        params = {"objective": "binary:logistic", "eval_metric": "auc", "verbosity": 0, "seed": random_state}
+    else:
+        params = {"objective": "multi:softprob", "num_class": num_class, "eval_metric": "mlogloss", "verbosity": 0, "seed": random_state}
+    model = xgb.train(params, dtrain, num_boost_round=100, verbose_eval=False)
     imp = model.get_score(importance_type="gain")
-    # map importances to columns
+    # map importances to columns safely
     scores = []
     for f in X.columns:
         k = f"f{X.columns.get_loc(f)}"

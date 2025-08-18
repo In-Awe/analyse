@@ -27,7 +27,10 @@ def load_config(path: str):
         return yaml.safe_load(f)
 
 def read_clean_csv(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, parse_dates=["timestamp"])
+    """Read cleaned data, expecting standard columns."""
+    df = pd.read_csv(path, index_col=0, parse_dates=True)
+    df.index.name = "timestamp"
+    df = df.reset_index()
     df = df.sort_values("timestamp").reset_index(drop=True)
     return df
 
