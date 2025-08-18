@@ -52,6 +52,10 @@ robustness:
   monte_carlo:
     n_shuffles: 2000
     seed: 42
+    use_dask: false           # set true to use Dask distributed for very large n_shuffles
+    dask:
+      address: null          # e.g. "tcp://scheduler:8786" or null for local cluster
+    n_workers: null          # optional override for number of workers (None => auto)
   param_sensitivity:
     sweep:
       - name: "position_fraction"

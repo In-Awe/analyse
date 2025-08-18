@@ -57,7 +57,7 @@ def main(argv=None):
     parser.add_argument("--early-stopping-rounds", type=int, default=20)
     args = parser.parse_args(argv)
 
-    outdir = Path(args.out_dir); outdir.mkdir(parents=True, exist_ok=True)
+    outdir = Path(args.out_dir)
     df = load_features(args.features)
     if args.target not in df.columns:
         for c in df.columns:
@@ -98,7 +98,16 @@ def main(argv=None):
     y_val_decoded = np.array([enc_to_label[int(p)] for p in y_val])
     m = metrics(y_val_decoded, preds, preds_prob if preds_prob.ndim==2 else None)
     # save bst and feature names
-    bst.save_model(str(outdir / "xgb_model.json"))
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    model_path = outdir / "xgb_model.json"
+    bst.save_model(str(model_path))
+    print(f"[xgb] saved model to {model_path.resolve()}")
+    if model_path.exists():
+        print(f"  ... success: {model_path.name} found.")
+    else:
+        print(f"  ... FAILED: {model_path.name} not found.")
+
     # store metadata and label mapping
     meta = {
         "feature_names": X.columns.tolist(),
@@ -106,11 +115,25 @@ def main(argv=None):
         "label_to_enc": {int(k): int(v) for k, v in label_to_enc.items()},
         "enc_to_label": {int(k): int(v) for k, v in enc_to_label.items()},
     }
-    with open(outdir / "xgb_meta.json", "w") as f:
+    meta_path = outdir / "xgb_meta.json"
+    with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
-    with open(outdir / "xgb_metrics.json", "w") as f:
+    print(f"[xgb] saved meta to {meta_path.resolve()}")
+    if meta_path.exists():
+        print(f"  ... success: {meta_path.name} found.")
+    else:
+        print(f"  ... FAILED: {meta_path.name} not found.")
+
+    metrics_path = outdir / "xgb_metrics.json"
+    with open(metrics_path, "w") as f:
         json.dump(m, f, indent=2)
-    print(f"[xgb] saved model to {outdir} metrics={m}")
+    print(f"[xgb] saved metrics to {metrics_path.resolve()}")
+    if metrics_path.exists():
+        print(f"  ... success: {metrics_path.name} found.")
+    else:
+        print(f"  ... FAILED: {metrics_path.name} not found.")
+
+    print(f"[xgb] finished saving artifacts to {outdir.resolve()} metrics={m}")
 
 if __name__ == "__main__":
     main()
