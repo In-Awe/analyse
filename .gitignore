@@ -28,3 +28,4 @@ backend/model/checkpoints/
 backend/config.env
 backend/.venv/
 backend/.venv/
+backend/.venv/
