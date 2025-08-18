@@ -1,0 +1,5 @@
+{
+  "name": "Crypto LLM Trading Analyst",
+  "description": "An interactive web application that uses Gemini to analyze historical cryptocurrency trading data from CSV files. Visualize price charts, apply technical indicators, and chat with an AI analyst to identify trading patterns and insights.",
+  "requestFramePermissions": []
+}
