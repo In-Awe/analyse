@@ -1,0 +1,21 @@
+# Phase III target config
+# Predict the direction in the next N minutes
+target:
+  horizon_minutes: 5
+  tau: 0.0005   # threshold for directional class (log-return). 0.0005 ~ 0.05%
+  classification: true
+  classes:
+    up: 1
+    down: -1
+    sideways: 0
+  # Train/val/test split (fractional, time-ordered)
+  splits:
+    train_frac: 0.70
+    val_frac: 0.15
+    test_frac: 0.15
+  # Walk-forward params (days as integer)
+  walk_forward:
+    train_window_days: 30
+    test_window_days: 7
+    step_days: 7
+  random_seed: 42

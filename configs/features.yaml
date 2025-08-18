@@ -1,0 +1,33 @@
+# Phase II feature configuration
+technical_indicators:
+  sma: [3, 5, 10, 30, 60, 120]
+  ema: [3, 5, 10, 30, 60, 120]
+  macd:
+    - {fast: 12, slow: 26, signal: 9}
+    - {fast: 3, slow: 8, signal: 5}
+  rsi: [6, 14, 30]
+  atr: [14, 30]
+  bollinger:
+    - {window: 20, ndev: 2}
+    - {window: 50, ndev: 2}
+
+microstructure:
+  vwap:
+    windows: [60, 240]   # in minutes
+  vvr:
+    window: 30
+  vol_of_vol:
+    window: 120
+  candle_morphology: true
+  vol_price_corr:
+    window: 60
+
+interaction_features:
+  enabled: true
+  combos:
+    - ["rsi_14", "atr_14"]
+    - ["sma_10", "sma_30"]
+
+selection:
+  top_k: 50
+  corr_threshold: 0.95

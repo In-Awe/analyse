@@ -5,3 +5,9 @@ statsmodels
 matplotlib
 seaborn
 pyarrow
+xgboost
+scikit-learn
+PyYAML
+torch
+optuna
+joblib
