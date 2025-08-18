@@ -1,0 +1,7 @@
+{
+    "is_monotonic": true,
+    "missing_ts": 0,
+    "duplicates": 0,
+    "zero_volume_in_high_vol": 0,
+    "spikes": 0
+}

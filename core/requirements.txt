@@ -1,0 +1,7 @@
+typer==0.9.0
+pandas==2.2.0
+numpy==1.26.0
+pandas-ta==0.3.0b0
+python-binance==1.0.16
+pytest==7.4.0
+rich==13.6.0

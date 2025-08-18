@@ -1,7 +1,24 @@
-typer==0.9.0
+typer[all]==0.9.0
 pandas==2.2.0
 numpy==1.26.0
 pandas-ta==0.3.14b0
 python-binance==1.0.16
+transformers==4.34.0
+accelerate==0.22.0
+peft==0.4.0
+bitsandbytes==0.39.0
+torch==2.2.0
+torchaudio==2.2.0
 pytest==7.4.0
 rich==13.6.0
+python-dotenv==1.0.0
+# faiss-cpu==1.7.4
+
+# notes: bitsandbytes and torch versions change frequently. If install fails on macOS, use CPU fallback.
+
+# analysis & feature libs
+statsmodels==0.14.0
+scipy==1.11.3
+scikit-learn==1.3.2
+# xgboost is optional but valuable for importance ranking; may be heavy on macOS
+# xgboost==1.8.1

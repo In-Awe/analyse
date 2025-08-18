@@ -1,0 +1,4 @@
+[
+  {"prompt":"Price sequence: 2025-01-01 O:100 H:102 L:99 C:101 RSI:45 EMA50:100 EMA200:98\nQuestion: What pattern do you see?","response":"Short term uptrend, bullish crossover, RSI neutral. Bias: small buy with stop under 99."},
+  {"prompt":"Price sequence: 2025-01-02 O:120 H:121 L:118 C:119 RSI:78 EMA50:110 EMA200:115\nQuestion: What pattern do you see?","response":"Overbought on RSI with price above EMAs. Risk of pullback. Consider taking profit."}
+]

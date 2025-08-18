@@ -1,0 +1,6 @@
+{
+    "skewness": -2.161173843749081,
+    "kurtosis": 154.61724214217767,
+    "adf_pvalue": 0.0,
+    "notable_acf_lags": "Visual inspection of ACF plots needed"
+}
