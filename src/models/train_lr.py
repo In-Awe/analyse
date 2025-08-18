@@ -65,7 +65,6 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     outdir = Path(args.out_dir)
-    outdir.mkdir(parents=True, exist_ok=True)
 
     df = load_features(args.features)
     # ensure correct default target name
@@ -89,10 +88,26 @@ def main(argv=None):
     y_val_decoded = np.array([enc_to_label[int(p)] for p in y_val])
     m = metrics(y_val_decoded, preds, probs if probs is not None else None)
     # save artifacts
-    joblib.dump({"model": clf, "scaler": scaler, "label_to_enc": label_to_enc, "enc_to_label": enc_to_label}, outdir / "lr_artifact.joblib")
-    with open(outdir / "lr_metrics.json", "w") as f:
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    artifact_path = outdir / "lr_artifact.joblib"
+    joblib.dump({"model": clf, "scaler": scaler, "label_to_enc": label_to_enc, "enc_to_label": enc_to_label}, artifact_path)
+    print(f"[lr] saved artifact to {artifact_path.resolve()}")
+    if artifact_path.exists():
+        print(f"  ... success: {artifact_path.name} found.")
+    else:
+        print(f"  ... FAILED: {artifact_path.name} not found.")
+
+    metrics_path = outdir / "lr_metrics.json"
+    with open(metrics_path, "w") as f:
         json.dump(m, f, indent=2)
-    print(f"[lr] saved model to {outdir} metrics={m}")
+    print(f"[lr] saved metrics to {metrics_path.resolve()}")
+    if metrics_path.exists():
+        print(f"  ... success: {metrics_path.name} found.")
+    else:
+        print(f"  ... FAILED: {metrics_path.name} not found.")
+
+    print(f"[lr] finished saving artifacts to {outdir.resolve()} metrics={m}")
 
 if __name__ == "__main__":
     main()

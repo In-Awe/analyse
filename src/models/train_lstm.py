@@ -13,6 +13,7 @@ Saves:
 from __future__ import annotations
 import argparse
 from pathlib import Path
+from datetime import datetime
 import json
 import numpy as np
 import pandas as pd
@@ -107,7 +108,7 @@ def main(argv=None):
     parser.add_argument("--out-dir", default="artifacts/models/lstm")
     args = parser.parse_args(argv)
 
-    outdir = Path(args.out_dir); outdir.mkdir(parents=True, exist_ok=True)
+    outdir = Path(args.out_dir)
     df = load_features(args.features)
     if args.target not in df.columns:
         for c in df.columns:
@@ -141,19 +142,68 @@ def main(argv=None):
     # final eval on validation set
     final_metrics = eval_loop(model, val_loader)
     # save model + scaler + metrics
-    torch.save(model.state_dict(), outdir / "lstm_model.pt")
-    # save scaler via joblib
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    model_path = outdir / "lstm_model.pt"
+    torch.save(model.state_dict(), model_path)
+    print(f"[lstm] saved model to {model_path.resolve()}")
+    if model_path.exists():
+        print(f"  ... success: {model_path.name} found.")
+    else:
+        print(f"  ... FAILED: {model_path.name} not found.")
+
     import joblib
-    joblib.dump(scaler, outdir / "lstm_scaler.joblib")
-    # save label mapping
-    import json
-    with open(outdir / "label_mapping.json", "w") as f:
+    scaler_path = outdir / "lstm_scaler.joblib"
+    joblib.dump(scaler, scaler_path)
+    print(f"[lstm] saved scaler to {scaler_path.resolve()}")
+    if scaler_path.exists():
+        print(f"  ... success: {scaler_path.name} found.")
+    else:
+        print(f"  ... FAILED: {scaler_path.name} not found.")
+
+    label_map_path = outdir / "label_mapping.json"
+    with open(label_map_path, "w") as f:
         label_to_enc_json = {int(k): int(v) for k, v in label_to_enc.items()}
         enc_to_label_json = {int(k): int(v) for k, v in enc_to_label.items()}
         json.dump({"label_to_enc": label_to_enc_json, "enc_to_label": enc_to_label_json}, f, indent=2)
-    with open(outdir / "lstm_metrics.json", "w") as f:
+    print(f"[lstm] saved label map to {label_map_path.resolve()}")
+    if label_map_path.exists():
+        print(f"  ... success: {label_map_path.name} found.")
+    else:
+        print(f"  ... FAILED: {label_map_path.name} not found.")
+
+    meta = {
+        "timestamp_utc": datetime.utcnow().isoformat(),
+        "input_size": int(X.shape[1]) if 'X' in locals() else None,
+        "seq_len": int(args.seq_len),
+        "hidden_size": 64,
+        "num_layers": 1,
+        "dropout": 0.1,
+        "num_classes": int(num_classes),
+        "optimizer": "adam",
+        "learning_rate": 1e-3,
+        "batch_size": int(args.batch_size),
+        "training_epochs": int(args.epochs),
+    }
+    meta_path = outdir / "lstm_meta.json"
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"[lstm] saved meta to {meta_path.resolve()}")
+    if meta_path.exists():
+        print(f"  ... success: {meta_path.name} found.")
+    else:
+        print(f"  ... FAILED: {meta_path.name} not found.")
+
+    metrics_path = outdir / "lstm_metrics.json"
+    with open(metrics_path, "w") as f:
         json.dump(final_metrics, f, indent=2)
-    print(f"[lstm] saved model to {outdir} metrics={final_metrics}")
+    print(f"[lstm] saved metrics to {metrics_path.resolve()}")
+    if metrics_path.exists():
+        print(f"  ... success: {metrics_path.name} found.")
+    else:
+        print(f"  ... FAILED: {metrics_path.name} not found.")
+
+    print(f"[lstm] finished saving artifacts to {outdir.resolve()} metrics={final_metrics}")
 
 if __name__ == "__main__":
     main()

@@ -10,6 +10,10 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+import sys
+
+SRC_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(SRC_ROOT))
 
 import pandas as pd
 
@@ -37,8 +41,12 @@ def run(args):
     mc_cfg = cfg.get("robustness", {}).get("monte_carlo", {})
     n = int(mc_cfg.get("n_shuffles", 2000))
     seed = int(mc_cfg.get("seed", 42))
-    print(f"[robustness] running monte-carlo reshuffle n={n}")
-    mc = monte_carlo_trade_reshuffle(trades, n=n, seed=seed)
+    use_dask = args.use_dask if args.use_dask is not None else bool(mc_cfg.get("use_dask", False))
+    dask_cfg = mc_cfg.get("dask", {})
+    n_workers = mc_cfg.get("n_workers", None)
+    mode = "dask" if use_dask else "multiprocess"
+    print(f"[robustness] running monte-carlo reshuffle n={n} mode={mode}")
+    mc = monte_carlo_trade_reshuffle(trades, n=n, seed=seed, mode=mode, n_workers=n_workers, dask_cfg=dask_cfg)
     with open(out_dir / "monte_carlo.json", "w") as f:
         json.dump(mc, f, indent=2)
     # parameter sensitivity
@@ -52,8 +60,9 @@ def run(args):
     for combo in product(*lists):
         d = {names[i]: combo[i] for i in range(len(names))}
         grid.append(d)
-    print(f"[robustness] running param sensitivity for {len(grid)} combinations")
-    ps_results = parameter_sensitivity_grid(args.config, merged, grid)
+    parallel = ps_cfg.get("parallel", False)
+    print(f"[robustness] running param sensitivity for {len(grid)} combinations (parallel={parallel})")
+    ps_results = parameter_sensitivity_grid(args.config, merged, grid, parallel=parallel)
     with open(out_dir / "param_sensitivity.json", "w") as f:
         json.dump(ps_results, f, indent=2)
     print(f"[robustness] saved results to {out_dir}")
@@ -62,6 +71,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/backtest.yaml")
     parser.add_argument("--merged", default=None, help="override merged parquet path")
+    parser.add_argument("--use-dask", action="store_true", help="override config to use Dask for Monte Carlo")
     args = parser.parse_args()
     run(args)
 
