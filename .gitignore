@@ -12,3 +12,5 @@ backend/model/checkpoints/
 
 # virtualenv
 backend/.venv/
+data/features/
+artifacts/
