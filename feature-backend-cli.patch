@@ -42,7 +42,7 @@ index 0000000..2222222
 +      - name: Run tests
 +        run: pytest backend/tests -q
 +
-diff --git a/backend/README.md b/backend/README.md
++diff --git a/backend/README.md b/backend/README.md
 new file mode 100644
 index 0000000..3333333
 --- /dev/null
@@ -134,7 +134,7 @@ index 0000000..3333333
 +
 +If you want a full patch applied automatically, use the accompanying git patch.
 +
-diff --git a/backend/requirements.txt b/backend/requirements.txt
++diff --git a/backend/requirements.txt b/backend/requirements.txt
 new file mode 100644
 index 0000000..4444444
 --- /dev/null
@@ -157,7 +157,7 @@ index 0000000..4444444
 +faiss-cpu==1.7.4
 +
 +# notes: bitsandbytes and torch versions change frequently. If install fails on macOS, use CPU fallback.
-diff --git a/backend/config.example.env b/backend/config.example.env
++diff --git a/backend/config.example.env b/backend/config.example.env
 new file mode 100644
 index 0000000..5555555
 --- /dev/null
@@ -170,7 +170,7 @@ index 0000000..5555555
 +BINANCE_TESTNET_API_SECRET=
 +MODEL_REPO=meta-llama/Llama-2-7b-chat-hf
 +
-diff --git a/backend/cli.py b/backend/cli.py
++diff --git a/backend/cli.py b/backend/cli.py
 new file mode 100644
 index 0000000..6666666
 --- /dev/null
@@ -236,7 +236,7 @@ index 0000000..6666666
 +
 +if __name__ == "__main__":
 +    app()
-diff --git a/backend/data/__init__.py b/backend/data/__init__.py
++diff --git a/backend/data/__init__.py b/backend/data/__init__.py
 new file mode 100644
 index 0000000..7777777
 --- /dev/null
@@ -244,7 +244,7 @@ index 0000000..7777777
 @@ -0,0 +1,2 @@
 +# data package
 +__all__ = ["loader", "features"]
-diff --git a/backend/data/loader.py b/backend/data/loader.py
++diff --git a/backend/data/loader.py b/backend/data/loader.py
 new file mode 100644
 index 0000000..8888888
 --- /dev/null
@@ -287,7 +287,7 @@ index 0000000..8888888
 +    available = [c for c in cols if c in recent.columns]
 +    records = recent[available].to_dict('records')
 +    return records
-diff --git a/backend/data/features.py b/backend/data/features.py
++diff --git a/backend/data/features.py b/backend/data/features.py
 new file mode 100644
 index 0000000..9999999
 --- /dev/null
@@ -313,7 +313,7 @@ index 0000000..9999999
 +        df['ema_200'] = pd.NA
 +    return df
 +
-diff --git a/backend/binance_client.py b/backend/binance_client.py
++diff --git a/backend/binance_client.py b/backend/binance_client.py
 new file mode 100644
 index 0000000..aaaaaaaa
 --- /dev/null
@@ -347,7 +347,7 @@ index 0000000..aaaaaaaa
 +
 +    # Future: implement testnet create_test_order and live order wrappers as needed.
 +
-diff --git a/backend/model/__init__.py b/backend/model/__init__.py
++diff --git a/backend/model/__init__.py b/backend/model/__init__.py
 new file mode 100644
 index 0000000..bbbbbbbb
 --- /dev/null
@@ -355,7 +355,7 @@ index 0000000..bbbbbbbb
 @@ -0,0 +1,2 @@
 +# model package
 +__all__ = ["infer", "lora_train"]
-diff --git a/backend/model/infer.py b/backend/model/infer.py
++diff --git a/backend/model/infer.py b/backend/model/infer.py
 new file mode 100644
 index 0000000..cccccccc
 --- /dev/null
@@ -427,7 +427,7 @@ index 0000000..cccccccc
 +        {"timestamp":"2025-01-01 00:00","open":100,"high":102,"low":99,"close":101,"volume":1.2,"rsi":45,"ema_50":100,"ema_200":98}
 +    ]
 +    print(analyse_series(sample))
-diff --git a/backend/model/lora_train.py b/backend/model/lora_train.py
++diff --git a/backend/model/lora_train.py b/backend/model/lora_train.py
 new file mode 100644
 index 0000000..dddddddd
 --- /dev/null
@@ -512,7 +512,7 @@ index 0000000..dddddddd
 +        with open(sample_path, "w") as fh:
 +            json.dump(sample, fh)
 +    train_lora(sample_path, "backend/model/checkpoints")
-diff --git a/backend/backtest/__init__.py b/backend/backtest/__init__.py
++diff --git a/backend/backtest/__init__.py b/backend/backtest/__init__.py
 new file mode 100644
 index 0000000..eeeeeeee
 --- /dev/null
@@ -520,7 +520,7 @@ index 0000000..eeeeeeee
 @@ -0,0 +1,1 @@
 +# backtest package
 +__all__ = ["engine", "metrics"]
-diff --git a/backend/backtest/engine.py b/backend/backtest/engine.py
++diff --git a/backend/backtest/engine.py b/backend/backtest/engine.py
 new file mode 100644
 index 0000000..ffffffff
 --- /dev/null
@@ -568,7 +568,7 @@ index 0000000..ffffffff
 +        'rsi': [50]*200
 +    })
 +    print(simple_ma_rsi_strategy(df))
-diff --git a/backend/backtest/metrics.py b/backend/backtest/metrics.py
++diff --git a/backend/backtest/metrics.py b/backend/backtest/metrics.py
 new file mode 100644
 index 0000000..12121212
 --- /dev/null
@@ -605,7 +605,7 @@ index 0000000..12121212
 +        "max_drawdown": float(dd)
 +    }
 +
-diff --git a/backend/tests/test_loader.py b/backend/tests/test_loader.py
++diff --git a/backend/tests/test_loader.py b/backend/tests/test_loader.py
 new file mode 100644
 index 0000000..34343434
 --- /dev/null
@@ -631,7 +631,7 @@ index 0000000..34343434
 +    assert 'rsi' in df_loaded.columns
 +    assert len(df_loaded) == 10
 +
-diff --git a/backend/tests/test_binance_client.py b/backend/tests/test_binance_client.py
++diff --git a/backend/tests/test_binance_client.py b/backend/tests/test_binance_client.py
 new file mode 100644
 index 0000000..45454545
 --- /dev/null
@@ -651,7 +651,7 @@ index 0000000..45454545
 +    c = BinanceClient(api_key=None, api_secret=None)
 +    assert hasattr(c, "get_historical_klines")
 +
-diff --git a/backend/samples/toy_train.json b/backend/samples/toy_train.json
++diff --git a/backend/samples/toy_train.json b/backend/samples/toy_train.json
 new file mode 100644
 index 0000000..56565656
 --- /dev/null
@@ -662,7 +662,7 @@ index 0000000..56565656
 +  {"prompt":"Price sequence: 2025-01-02 O:120 H:121 L:118 C:119 RSI:78 EMA50:110 EMA200:115\nQuestion: What pattern do you see?","response":"Overbought on RSI with price above EMAs. Risk of pullback. Consider taking profit."}
 +]
 +
-diff --git a/backend/samples/prompt_templates.md b/backend/samples/prompt_templates.md
++diff --git a/backend/samples/prompt_templates.md b/backend/samples/prompt_templates.md
 new file mode 100644
 index 0000000..67676767
 --- /dev/null
@@ -682,7 +682,7 @@ index 0000000..67676767
 +
 +Use concise bullet points and do not hallucinate numerical facts not present in the snippet.
 +
-diff --git a/backend/model/checkpoints/.gitkeep b/backend/model/checkpoints/.gitkeep
++diff --git a/backend/model/checkpoints/.gitkeep b/backend/model/checkpoints/.gitkeep
 new file mode 100644
 index 0000000..78787878
 --- /dev/null
