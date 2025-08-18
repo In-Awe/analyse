@@ -1,0 +1,63 @@
+# Phase IV backtest configuration (vectorized)
+backtest:
+  input:
+    merged_features: "data/features/merged_features_with_target.parquet"  # merged features (with timestamp + target)
+    price_column_open: "open_x"
+    price_column_close: "close_x"
+    timestamp_column: "timestamp"
+  capital:
+    initial_capital: 100000.0   # USD
+    position_fraction: 0.10     # fraction of equity to allocate per trade (e.g., 0.10 = 10%)
+  execution:
+    execution_delay_bars: 1     # execute orders at next bar (1 = next bar)
+    slippage:
+      type: "atr_fraction"      # "fixed" or "atr_fraction"
+      fixed_pct: 0.0005         # 0.05% fixed slippage if type=fixed
+      atr_fraction: 0.5         # slippage = atr_next * atr_fraction expressed relative to price (see code)
+    fee:
+      maker_fee_pct: 0.0002     # 0.02%
+      taker_fee_pct: 0.0004     # 0.04%
+    order_type: "market"        # market or limit (scaffold uses market)
+  pricing:
+    slippage_alpha: 0.5         # fallback alpha (fraction of ATR used for slippage)
+  signals:
+    # signal source: "model" (load model) or "col" (use an existing column in merged_features)
+    source: "col"
+    model:
+      type: "xgboost"           # xgboost | lr | lstm (scaffold supports xgboost loader)
+      path: "artifacts/models/xgb/xgb_model.json"
+      meta: "artifacts/models/xgb/xgb_meta.json"  # file with feature_names and label mapping
+      predict_proba: true
+    # if source == "col", specify the column name holding the signal (-1/0/1)
+    col_name: "next_5m_dir"
+  risk:
+    max_drawdown_pct: 0.3       # stop-loss for backtest simulation (not enforced by default)
+    stop_on_max_daily_loss_pct: 0.1
+  outputs:
+    out_dir: "artifacts/backtest"
+    save_trades_csv: true
+    save_equity_csv: true
+    save_summary_json: true
+# Optional model-specific configs for LSTM support
+models:
+  lstm:
+    model_path: "artifacts/models/lstm/lstm_model.pt"
+    scaler_path: "artifacts/models/lstm/lstm_scaler.joblib"
+    label_map: "artifacts/models/lstm/label_mapping.json"
+    seq_len: 60
+    batch_size: 512
+
+# Robustness analysis configuration
+robustness:
+  monte_carlo:
+    n_shuffles: 2000
+    seed: 42
+  param_sensitivity:
+    sweep:
+      - name: "position_fraction"
+        values: [0.01, 0.03, 0.05, 0.10, 0.20]
+      - name: "execution_delay_bars"
+        values: [0, 1, 2, 3]
+      - name: "execution.slippage.atr_fraction"
+        values: [0.1, 0.3, 0.5, 0.8, 1.0]
+    parallel: false

@@ -11,3 +11,4 @@ PyYAML
 torch
 optuna
 joblib
+tqdm
