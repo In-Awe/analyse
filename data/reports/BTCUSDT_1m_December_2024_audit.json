@@ -1,0 +1,19 @@
+{
+  "rows_raw": 44640,
+  "duplicate_timestamp_count": 0,
+  "first_timestamp": "2024-11-30 13:00:00+00:00",
+  "last_timestamp": "2024-12-31 12:59:00+00:00",
+  "expected_rows_for_timespan": 44640,
+  "missing_timestamps_count": 0,
+  "spike_candidates_found": 0,
+  "logreturn_mean": -4.669634361922241e-07,
+  "logreturn_std": 0.0007520384265187536,
+  "logreturn_skew": -2.1612707165764924,
+  "logreturn_kurtosis": 154.63822764340745,
+  "adf_stationarity_test": {
+    "statistic": -42.97842029094945,
+    "p_value": 0.0,
+    "is_stationary_at_5_percent": true,
+    "lags_used": 23
+  }
+}
