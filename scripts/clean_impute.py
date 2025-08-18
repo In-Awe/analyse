@@ -62,6 +62,10 @@ def clean_impute_data(input_path: str, output_csv_path: str, output_log_path: st
     moderate_spikes_mask = (df['price_change'] > k_moderate_spike * df['rolling_std_30']) & \
                            (df['price_change'] <= k_severe_spike * df['rolling_std_30'])
     df.loc[moderate_spikes_mask, 'is_spike'] = True
+    df.loc[moderate_spikes_mask, 'spike_magnitude'] = df['price_change'] / df['rolling_std_30']
+
+    # Fill NaNs for non-spike periods with 0
+    df['spike_magnitude'] = df['spike_magnitude'].fillna(0.0)
 
     # Add smoothed columns for moderate spikes
     for col in ['open', 'high', 'low', 'close']:
