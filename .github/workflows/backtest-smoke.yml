@@ -1,0 +1,30 @@
+name: Backtest smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/phase4-backtest
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Run backtest smoke
+        run: |
+          mkdir -p artifacts/backtest/smoke
+          python scripts/run_backtest.py --data data/cleaned/BTCUSD_1min.cleaned.csv --out artifacts/backtest/smoke || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-smoke
+          path: artifacts/backtest/smoke

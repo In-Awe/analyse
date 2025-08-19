@@ -1,68 +1,42 @@
 #!/usr/bin/env python3
+"""Command-line runner for Phase IV backtests (vectorized).
+Usage:
+  python scripts/run_backtest.py --data data/cleaned/BTCUSD_1min.cleaned.csv --out artifacts/backtest/run1
 """
-Simple runner for the backtester skeleton. Supports --sample to run a small generated dataset
-for CI smoke tests.
-"""
-import argparse
-import os
-import json
 from pathlib import Path
-import pandas as pd
-import numpy as np
+import argparse
 import yaml
-from src.backtest.backtester import VectorBacktester
+import pandas as pd
 
-def sample_df(n=300):
-    # Build a tiny synthetic minute OHLCV series for smoke-run
-    idx = pd.date_range(end=pd.Timestamp.utcnow().floor('T'), periods=n, freq='T')
-    price = 50000 + np.cumsum(np.random.normal(0, 1, size=n))
-    df = pd.DataFrame({
-        'timestamp': idx,
-        'open': price,
-        'high': price + np.abs(np.random.normal(0, 1, size=n)),
-        'low': price - np.abs(np.random.normal(0, 1, size=n)),
-        'close': price + np.random.normal(0, 0.2, size=n),
-        'volume': np.abs(np.random.normal(1, 0.3, size=n)),
-    }).set_index('timestamp')
-    return df
+from src.backtest.backtester import Backtester, BacktestConfig
+
+def load_config(path):
+    with open(path, "r") as f:
+        return yaml.safe_load(f)
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--input', help='Input cleaned CSV (OHLCV)', default=None)
-    p.add_argument('--config', help='Config YAML', default='configs/trade_logic.yaml')
-    p.add_argument('--outdir', help='Output directory', default='artifacts/backtest/run_local')
-    p.add_argument('--sample', help='Run on synthetic sample data', action='store_true')
-    args = p.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--config", default="configs/backtest.yaml")
+    parser.add_argument("--out", default="artifacts/backtest/default")
+    args = parser.parse_args()
 
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    cfg_dict = load_config(args.config)
+    cfg = BacktestConfig(**cfg_dict.get("backtest", {}))
 
-    with open(args.config, 'r') as fh:
-        cfg = yaml.safe_load(fh)
+    df = pd.read_csv(args.data, index_col=0, parse_dates=True)
+    # require 'signal' column; simple default: SIDEWAYS if missing
+    if "signal" not in df.columns:
+        df["signal"] = 0
+    # ensure atr exists
+    if "atr" not in df.columns:
+        df["returns"] = (df["close"].astype(float).pct_change()).fillna(0)
+        df["atr"] = df["returns"].rolling(14).std().fillna(0) * df["close"]
 
-    if args.sample or args.input is None:
-        df = sample_df()
-    else:
-        df = pd.read_csv(args.input, parse_dates=['timestamp'], index_col='timestamp')
+    bt = Backtester(df, cfg)
+    equity, trades = bt.run()
+    bt.save_outputs(args.out)
+    print("Backtest complete. Outputs saved to", args.out)
 
-    # Minimal signals: use simple momentum: compare close to 5-min SMA
-    df['sma5'] = df['close'].rolling(5, min_periods=1).mean()
-    df['signal'] = np.where(df['close'] > df['sma5'], 'BUY', 'FLAT')
-
-    # This will fail if src is not in python path. Let's add it.
-    import sys
-    sys.path.insert(0, os.getcwd())
-    from src.backtest.backtester import VectorBacktester
-
-    bt = VectorBacktester(df=df, config=cfg)
-    trades, equity, summary = bt.run()
-
-    trades.to_csv(outdir / 'trades.csv', index=False)
-    equity.to_csv(outdir / 'equity_curve.csv', index=False)
-    with open(outdir / 'summary.json', 'w') as fh:
-        json.dump(summary, fh, indent=2, default=str)
-
-    print("Backtest complete. Artifacts written to", outdir)
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
