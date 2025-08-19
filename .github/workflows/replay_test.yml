@@ -1,0 +1,24 @@
+name: Replay Smoke Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  replay-smoke:
+    runs-on: ubuntu-latest
+    steps:
+     - uses: actions/checkout@v4
+     - name: Set up Python
+       uses: actions/setup-python@v4
+       with:
+         python-version: '3.10'
+     - name: Install deps
+       run: |
+         python -m pip install --upgrade pip
+         pip install -r requirements-backtest.txt
+     - name: Run replay smoke
+       run: |
+         python scripts/replay_market.py data/cleaned/BTCUSD_1min.cleaned.csv

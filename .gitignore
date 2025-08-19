@@ -28,3 +28,4 @@ data/features/
 *.pkl
 artifacts/**/*
 !artifacts/.keep
+node_modules/

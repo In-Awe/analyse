@@ -1,20 +1,7 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Analyse — Phase V additions
 
-# Run and deploy your AI Studio app
+This patch adds Phase V architecture docs and skeleton module implementations for local replay testing and CI smoke tests.
 
-This contains everything you need to run your app locally.
+Apply with: git apply phase5_patch.patch && git add . && git commit -m "feat(phase5): add skeletons"
 
-View your app in AI Studio: https://ai.studio/apps/drive/1kE9RHCd04RlqMCZ96sWuE9azudk8n9ZE
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+--
