@@ -8,6 +8,7 @@ set -euo pipefail
 #   ./scripts/run_phase4_qa.sh --robust   # only robustness (short)
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+export PYTHONPATH="${ROOT}"
 ARTIFACT_DIR="${ROOT}/artifacts/phase4_qa/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "${ARTIFACT_DIR}"
 
