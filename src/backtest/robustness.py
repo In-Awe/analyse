@@ -9,16 +9,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-def monte_carlo_trade_reshuffle(trades_df: pd.DataFrame, n: int = 1000):
+def monte_carlo_trade_reshuffle(trades_df: pd.DataFrame, n: int = 1000, seed: int | None = None):
     """
     trades_df must have 'pnl' column (per trade P&L). Returns distribution dict.
     """
     if "pnl" not in trades_df.columns:
         raise ValueError("trades_df must include 'pnl' column")
     pnls = trades_df["pnl"].values
+    rng = np.random.default_rng(seed)
     results = []
     for _ in range(n):
-        perm = np.random.permutation(pnls)
+        perm = rng.permutation(pnls)
         results.append(perm.sum())
     return {
         "n": n,

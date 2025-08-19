@@ -51,7 +51,6 @@ def run(args):
     # Monte Carlo
     # mc_cfg = cfg.get("robustness", {}).get("monte_carlo", {})
     n = args.mc_iterations
-    seed = 42
     use_dask = False
     dask_cfg = {}
     n_workers = None
