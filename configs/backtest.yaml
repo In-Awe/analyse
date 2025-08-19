@@ -1,14 +1,11 @@
-backtest:
-  initial_capital: 10000.0
-  fee_maker: 0.0002
-  fee_taker: 0.0004
-  slippage_alpha: 0.5
-  min_notional: 10.0
-  execution: "next_open"
-
+initial_capital: 10000.0
+fee_maker: 0.0002
+fee_taker: 0.0004
+slippage_alpha: 0.5
+min_notional: 10.0
+execution: "next_open"
 robustness:
-  monte_carlo:
-    reshuffles: 2000
+  reshuffles: 2000
   noise:
     trials: 50
-    noise_scale: 0.1   # fraction of minute_return_std
+    noise_scale: 0.1 # fraction of minute_return_std

@@ -1,5 +1,4 @@
 # Phase IV — Backtesting & Robustness
-
 This document explains the basic backtesting runner added in `src/backtest` and how to run the smoke tests.
 
 ## Files added
@@ -15,10 +14,6 @@ This document explains the basic backtesting runner added in `src/backtest` and 
 ```bash
 python -m scripts.run_backtest --data data/cleaned/BTCUSD_1min.cleaned.csv --out artifacts/backtest/run1
 ```
-3. Outputs:
- - `artifacts/backtest/run1/equity_curve.csv`
- - `artifacts/backtest/run1/trades.csv`
- - `artifacts/backtest/run1/summary.json`
 
 ## Robustness
 Use `src/backtest/robustness.py` to:
