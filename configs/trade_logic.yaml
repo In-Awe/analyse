@@ -1,20 +1,38 @@
-# Trade logic + backtest defaults
+# Phase IV trading logic & execution frictions
+target:
+  horizon_minutes: 5
+  threshold_tau: 0.0005
+  classes: ["DOWN","SIDEWAYS","UP"]
+
+positioning:
+  # map predicted class -> target position
+  up: 1.0
+  down: -1.0
+  sideways: 0.0
+  max_leverage: 1.0
+  min_notional_usd: 10.0
+
 fees:
-  maker: 0.0002   # 0.02%
-  taker: 0.0004   # 0.04%
+  side: "taker"         # maker|taker
+  taker_bps: 10.0       # 0.10%
+  maker_bps: 2.0        # 0.02%
 
 slippage:
-  alpha: 0.5      # execution price = next_open + alpha * ATR_next
+  model: "atr"          # "next_open" or "atr"
+  alpha: 0.5            # price +/- alpha * ATR_next
 
 execution:
-  mode: "long-only" # long-only | long-short
-  min_notional: 10.0
+  fill_on: "next_open"  # next_open is more conservative than same-bar close
+  tick_size: 0.01
+  lot_size: 0.00001
 
-backtest:
-  signal_to_position:
-    BUY: 1
-    SELL: -1
-    FLAT: 0
+risk:
+  max_position_abs: 1.0
+  max_daily_loss_usd: 500.0
+  stop_loss_atr_mult: 4.0
 
-logging:
-  level: INFO
+paths:
+  cleaned_csv: "data/cleaned/BTCUSD_1min.cleaned.csv"
+  features_parquet: "data/features/microstructure.parquet"
+  model_artifact: "artifacts/models/final_model_xgb.pkl"
+  outputs_dir: "artifacts/backtest/"

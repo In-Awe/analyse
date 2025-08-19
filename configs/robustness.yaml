@@ -1,0 +1,29 @@
+oos:
+  test_fraction: 0.15   # last 15%
+
+walk_forward:
+  train_days: 30
+  test_days: 7
+  step_days: 7
+  retrain: false        # evaluate fixed model option; set true to retrain
+
+monte_carlo:
+  reshuffles: 5000
+  seed: 42
+
+sensitivity:
+  sweep_percent: 0.20
+  params:
+    - name: "threshold_tau"
+      path: "target.threshold_tau"
+    - name: "slippage_alpha"
+      path: "slippage.alpha"
+    - name: "taker_bps"
+      path: "fees.taker_bps"
+
+noise:
+  runs: 50
+  std_mult: 0.1   # 0.1 × minute_return_std
+
+decimation:
+  keep_fractions: [1.0, 0.75, 0.5]

@@ -6,6 +6,9 @@ __pycache__/
 # secrets and env
 .env
 backend/config.env
+*.env
+*.key
+*.pem
 
 # model checkpoints
 backend/model/checkpoints/
@@ -13,4 +16,15 @@ backend/model/checkpoints/
 # virtualenv
 backend/.venv/
 data/features/
-artifacts/
+
+# from patch
+*.rej
+*.orig
+*.log
+*.png
+*.pdf
+*.parquet
+*.pt
+*.pkl
+artifacts/**/*
+!artifacts/.keep
