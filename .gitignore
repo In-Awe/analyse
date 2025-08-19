@@ -1,31 +1,34 @@
-# general
-.DS_Store
+# Python
 __pycache__/
 *.pyc
+.pytest_cache/
+venv/
+env/
 
-# secrets and env
+# Environment
 .env
-backend/config.env
-*.env
+.env.local
 *.key
-*.pem
 
-# model checkpoints
-backend/model/checkpoints/
-
-# virtualenv
-backend/.venv/
-data/features/
-
-# from patch
-*.rej
-*.orig
-*.log
-*.png
-*.pdf
+# Data
+*.csv
+!*cleaned.csv
 *.parquet
-*.pt
+
+# Models
 *.pkl
-artifacts/**/*
-!artifacts/.keep
-node_modules/
+*.pt
+*.h5
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

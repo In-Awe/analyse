@@ -1,0 +1,8 @@
+version: '3.8'
+services:
+  trading-bot:
+    build: .
+    environment:
+      - ENVIRONMENT=production
+    volumes:
+      - ./data:/app/data

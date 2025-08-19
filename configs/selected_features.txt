@@ -1,0 +1,6 @@
+sma_10
+sma_30
+rsi_14
+volatility
+volume_ma
+vwap

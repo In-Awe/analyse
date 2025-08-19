@@ -1,36 +1,36 @@
-"""Simple replay script to emit candle events from a cleaned CSV for local integration tests.
-"""
-import time
-import argparse
-from typing import Callable
+#!/usr/bin/env python3
+"""Market Replay Script"""
 import pandas as pd
+from pathlib import Path
+from queue import Queue
+import logging
 
-def emit_row(row: pd.Series, emitter: Callable[[dict], None]):
-    # convert row fields to types
-    candle = {
-       'type': 'candle',
-       'symbol': row.get('symbol','BTCUSDT'),
-       'ts': int(row.name.timestamp() * 1000), # Convert timestamp to milliseconds
-       'open': float(row['open']),
-       'high': float(row['high']),
-       'low': float(row['low']),
-       'close': float(row['close']),
-       'volume': float(row.get('volume',0))
-    }
-    emitter(candle)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def replay(csv_path: str, emitter: Callable[[dict], None], realtime: bool = False, rate: float = 1.0):
-    df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-    for _, row in df.iterrows():
-       emit_row(row, emitter)
-       if realtime:
-           time.sleep(60.0 / rate)
+class MarketReplay:
+    def __init__(self, data_file: str):
+        self.data_file = Path(data_file)
+        self.message_queue = Queue()
+        
+    def replay(self):
+        """Replay historical market data"""
+        if not self.data_file.exists():
+            logger.error(f"Data file not found: {self.data_file}")
+            return
+            
+        df = pd.read_csv(self.data_file)
+        logger.info(f"Replaying {len(df)} rows of market data")
+        
+        for idx, row in df.iterrows():
+            event = {
+                'type': 'MARKET_DATA',
+                'data': row.to_dict()
+            }
+            self.message_queue.put(event)
+            
+        logger.info("Replay complete")
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('csv', help='Path to cleaned candles CSV')
-    parser.add_argument('--realtime', action='store_true')
-    args = parser.parse_args()
-    def print_ev(e):
-       print(e)
-    replay(args.csv, print_ev, realtime=args.realtime)
+if __name__ == "__main__":
+    replay = MarketReplay("data/cleaned/test_data.csv")
+    replay.replay()

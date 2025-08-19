@@ -1,0 +1,6 @@
+# Monitoring Configuration
+prometheus_enabled: false
+log_level: INFO
+alert_thresholds:
+  latency_ms: 200
+  error_rate_pct: 5

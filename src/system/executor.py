@@ -1,32 +1,49 @@
-"""Order execution skeleton
-
-Receives target positions and attempts to reconcile with live orders via Binance API (REST).
-This skeleton uses a local simulated executor for replay/testing.
-"""
+"""Order Execution Engine"""
+import logging
 import time
-from typing import Dict
+from datetime import datetime
+from typing import Dict, Optional
+from queue import Queue
 
-class Executor:
-    def __init__(self):
-       self.orders = {}
-       self.position = 0.0
+logger = logging.getLogger(__name__)
 
-    def execute_target(self, target_msg: Dict):
-       target = float(target_msg.get('target', 0.0))
-       symbol = target_msg.get('symbol')
-       now = int(time.time()*1000)
-       # For skeleton, emit a simulated filled order to reach target
-       trade = {
-           'type': 'trade',
-           'symbol': symbol,
-           'ts': now,
-           'filled_from': self.position,
-           'filled_to': target,
-           'qty': abs(target - self.position),
-       }
-       self.position = target
-       return trade
-
-if __name__ == '__main__':
-    e = Executor()
-    print(e.execute_target({'symbol':'BTCUSDT','target':0.1}))
+class ExecutionEngine:
+    def __init__(self, api_key: str = None, api_secret: str = None,
+                 message_bus: Optional[Queue] = None, testnet: bool = True):
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.message_bus = message_bus or Queue()
+        self.testnet = testnet
+        self.base_url = "https://testnet.binance.vision/api/v3" if testnet else "https://api.binance.com/api/v3"
+        self.active_orders = {}
+        
+    def process_order_request(self, order_request: Dict) -> Optional[Dict]:
+        """Process order request from risk manager"""
+        # Simulate order for testing
+        order_response = {
+            'symbol': order_request['symbol'],
+            'orderId': int(time.time() * 1000),
+            'status': 'FILLED',
+            'side': order_request['side'],
+            'executedQty': order_request['quantity'],
+            'price': order_request['limit_price']
+        }
+        self._emit_order_status(order_response)
+        return order_response
+        
+    def _emit_order_status(self, order_status: Dict):
+        """Emit order status to message bus"""
+        event = {
+            'type': 'ORDER_STATUS',
+            'timestamp': datetime.now().isoformat(),
+            'data': {
+                'order_id': order_status['orderId'],
+                'symbol': order_status['symbol'],
+                'status': order_status['status'],
+                'side': order_status.get('side'),
+                'filled_quantity': float(order_status.get('executedQty', 0)),
+                'filled_price': float(order_status.get('price', 0))
+            }
+        }
+        self.message_bus.put(event)
+        logger.info(f"Order status emitted: {order_status['orderId']} - {order_status['status']}")

@@ -1,10 +1,7 @@
-max_position_size: 1.0 # BTC
-max_notional_per_trade: 20000 # USD
-max_daily_loss: 10000 # USD
-max_unrealized_loss: 5000 # USD
-max_concurrent_orders: 10
-max_leverage: 1
-default_order_timeout_s: 60
-maker_fee: 0.0002
-taker_fee: 0.0004
-min_notional: 10
+# Risk Management Configuration
+max_position_size: 0.1  # 10% of portfolio
+max_daily_loss: 500.0   # $500
+stop_loss_pct: 0.02     # 2%
+take_profit_pct: 0.04   # 4%
+use_kelly_criterion: true
+kelly_fraction: 0.25
