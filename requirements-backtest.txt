@@ -3,3 +3,4 @@ numpy>=1.25
 pyyaml
 scipy
 statsmodels
+tqdm
