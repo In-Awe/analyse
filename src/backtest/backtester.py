@@ -1,110 +1,197 @@
+"""Minimal vectorized backtester for 1-minute OHLCV data.
+Implements:
+ - Signal -> position mapping (UP/DOWN/SIDEWAYS)
+ - Execution at next bar open with slippage = alpha * ATR_next
+ - Binance-style fee (maker/taker) application
+ - Outputs: equity_curve.csv, trades.csv, summary.json
+Designed to be deterministic and readable; extend / optimize as needed.
 """
-Vectorized backtester skeleton.
-
-Main class: VectorBacktester
-
-Inputs:
-- df: pandas DataFrame indexed by timestamp with columns: open/high/low/close/volume and a 'signal' column (BUY/SELL/FLAT)
-- config: dict loaded from YAML (fees, slippage.alpha, execution, backtest)
-Outputs:
-- trades: DataFrame with executed trades
-- equity: DataFrame with equity curve (timestamp, equity)
-- summary: dict
-"""
-from dataclasses import dataclass
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+import dataclasses
 import json
-from typing import Tuple, Dict
+import math
+from pathlib import Path
+from typing import Dict, Optional
 
-EPS = 1e-12
+import numpy as np
+import pandas as pd
 
-@dataclass
-class VectorBacktester:
-    df: pd.DataFrame
-    config: Dict
+@dataclasses.dataclass
+class BacktestConfig:
+    initial_capital: float = 10000.0
+    fee_maker: float = 0.0002
+    fee_taker: float = 0.0004
+    slippage_alpha: float = 0.5   # fraction of next ATR applied as slippage
+    min_notional: float = 10.0
+    execution: str = "next_open"   # currently only 'next_open' supported
+    pnl_col: str = "pnl"
+    timestamp_col: str = "timestamp"
 
-    def __post_init__(self):
-        required = ['open', 'high', 'low', 'close', 'volume']
-        for c in required:
-            if c not in self.df.columns:
-                raise ValueError(f"input df missing required column {c}")
-        self.df = self.df.copy()
-        # ensure datetime index
-        if not isinstance(self.df.index, pd.DatetimeIndex):
-            if 'timestamp' in self.df.columns:
-                self.df = self.df.set_index(pd.to_datetime(self.df['timestamp']))
-            else:
-                raise ValueError("df must have DatetimeIndex or timestamp column")
-        # create ATR for slippage model
-        self.df['tr'] = np.maximum(self.df['high'] - self.df['low'],
-                                   np.maximum((self.df['high'] - self.df['close'].shift(1)).abs(),
-                                              (self.df['low'] - self.df['close'].shift(1)).abs()))
-        self.df['atr'] = self.df['tr'].rolling(14, min_periods=1).mean().fillna(0)
 
-    def map_signal_to_target(self, s: pd.Series) -> pd.Series:
-        mapping = self.config.get('backtest', {}).get('signal_to_position', {'BUY':1,'SELL':-1,'FLAT':0})
-        return s.map(mapping).fillna(0).astype(float)
+class Backtester:
+    def __init__(self, df: pd.DataFrame, cfg: BacktestConfig):
+        """
+        df must contain:
+         - timestamp (datetimeindex or column named cfg.timestamp_col)
+         - open, high, low, close, volume
+         - signal: integer or categorical ('UP','DOWN','SIDEWAYS') or numeric (1,-1,0)
+         - atr (for slippage) recommended to be precomputed as next-bar ATR
+        """
+        self.cfg = cfg
+        self.df = df.copy()
+        # ensure timestamp index
+        if cfg.timestamp_col in self.df.columns:
+            self.df.index = pd.to_datetime(self.df[cfg.timestamp_col])
+        else:
+            if not isinstance(self.df.index, pd.DatetimeIndex):
+                raise ValueError("DataFrame must have timestamp column or DatetimeIndex")
 
-    def compute_execution_price(self) -> pd.Series:
-        # execution at next-open + alpha * ATR_next
-        alpha = float(self.config.get('slippage', {}).get('alpha', 0.5))
-        # use next open and next atr
-        next_open = self.df['open'].shift(-1)
-        next_atr = self.df['atr'].shift(-1).ffill().fillna(0.0)
-        exec_price = next_open + alpha * next_atr
-        # if next_open is NaN (end of series), fallback to current close
-        exec_price = exec_price.fillna(self.df['close'])
+        # normalize signal to -1/0/+1
+        self.df["signal_num"] = self.df.get("signal", 0)
+        self.df["signal_num"] = self.df["signal_num"].replace({"UP":1,"DOWN":-1,"SIDEWAYS":0})
+        self.df["signal_num"] = self.df["signal_num"].astype(float).fillna(0.0)
+
+        # placeholders for outputs
+        self.trades = []  # list of dicts
+        self.equity = []
+
+    def _compute_execution_price(self, idx: pd.Timestamp) -> float:
+        """
+        Execution price model: execution at next bar open plus slippage = alpha * ATR_next.
+        idx is the index (timestamp) of the row where we *observe* the signal; we execute on next index.
+        """
+        loc = self.df.index.get_loc(idx)
+        if loc + 1 >= len(self.df):
+            # can't execute at end of series
+            return float(self.df["close"].iloc[loc])
+        next_row = self.df.iloc[loc + 1]
+        exec_price = float(next_row["open"])
+        atr_next = float(next_row.get("atr", np.nan))
+        if not math.isnan(atr_next):
+            exec_price = exec_price + self.cfg.slippage_alpha * atr_next * (1 if self.df.loc[idx, "signal_num"] >= 0 else -1)
         return exec_price
 
-    def run(self) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
-        df = self.df.copy()
-        if 'signal' not in df.columns:
-            raise ValueError("df must contain a 'signal' column before running the backtester")
+    def run(self, position_sizing=None):
+        """
+        Vectorized-ish loop: iterate rows but avoid per-trade heavy operations.
+        position_sizing: function(equity, price, signal) -> target_qty (positive for long, negative for short)
+        Default sizing: fixed fraction (1% equity) converted to coin qty at execution price.
+        """
+        capital = self.cfg.initial_capital
+        position_qty = 0.0
+        position_entry_price = 0.0
+        equity = capital
+        equity_curve = []
 
-        df['target_pos'] = self.map_signal_to_target(df['signal'])
-        df['target_pos_prev'] = df['target_pos'].shift(1).fillna(0.0)
-        df['trade_qty'] = df['target_pos'] - df['target_pos_prev']
+        for i, ts in enumerate(self.df.index):
+            row = self.df.iloc[i]
+            sig = float(row["signal_num"])
+            # decide target position (in units of base asset)
+            if position_sizing is None:
+                # default: risk 1% equity, buy as much as that buys
+                risk_fraction = 0.01
+                target_notional = equity * risk_fraction
+            else:
+                target_notional = position_sizing(equity, row, sig)
 
-        df['exec_price'] = self.compute_execution_price()
+            # compute execution at next bar (if possible)
+            if i + 1 >= len(self.df):
+                # finalization step: mark to market
+                current_price = float(row["close"])
+                unreal = position_qty * (current_price - position_entry_price)
+                equity = equity + unreal
+                equity_curve.append({"timestamp": ts, "equity": equity})
+                break
 
-        df['notional'] = df['trade_qty'] * df['exec_price']
+            exec_price = self._compute_execution_price(ts)
 
-        min_notional = float(self.config.get('execution', {}).get('min_notional', 0.0))
-        is_trade = (df['notional'].abs() >= min_notional) & (df['trade_qty'] != 0)
+            # decide new qty
+            new_qty = 0.0
+            if sig > 0.5:
+                new_qty = max(0.0, target_notional / max(exec_price, 1e-12))
+            elif sig < -0.5:
+                new_qty = -max(0.0, target_notional / max(exec_price, 1e-12))
+            else:
+                new_qty = 0.0
 
-        fees_cfg = self.config.get('fees', {})
-        taker_fee = float(fees_cfg.get('taker', 0.0004))
-        df['fees'] = df['notional'].abs() * taker_fee
+            # round to sensible precision here if needed
+            # compute trade qty delta
+            delta_qty = new_qty - position_qty
+            trade_notional = abs(delta_qty) * exec_price
+            fee = 0.0
+            if trade_notional >= self.cfg.min_notional and abs(delta_qty) > 0:
+                # treat all aggressive changes as taker for simplicity
+                fee = trade_notional * self.cfg.fee_taker
+                # apply P&L for closing portion of position
+                pnl = 0.0
+                if position_qty != 0:
+                    # closing proportion
+                    close_qty = min(abs(delta_qty), abs(position_qty)) * np.sign(position_qty)
+                    pnl = -close_qty * (exec_price - position_entry_price) * -1  # careful sign
+                    equity += pnl
+                # update position entry price on increases (simple weighted avg)
+                if abs(new_qty) > 0:
+                    if position_qty == 0:
+                        position_entry_price = exec_price
+                    else:
+                        # new weighted avg entry
+                        position_entry_price = (
+                            (position_entry_price * abs(position_qty) + exec_price * abs(delta_qty))
+                            / max(abs(position_qty) + abs(delta_qty), 1e-12)
+                        )
+                position_qty = new_qty
+                equity -= fee
+                self.trades.append({
+                    "timestamp": self.df.index[i+1] if (i+1) < len(self.df) else ts,
+                    "exec_price": exec_price,
+                    "delta_qty": delta_qty,
+                    "position_qty": position_qty,
+                    "fee": fee,
+                    "equity": equity
+                })
 
-        df['cash_flow'] = -df['notional'] - df['fees']
+            # mark-to-market at close of that next bar
+            next_close = float(self.df.iloc[i+1]["close"])
+            unreal = position_qty * (next_close - position_entry_price)
+            eq_snapshot = equity + unreal
+            equity_curve.append({"timestamp": self.df.index[i+1], "equity": eq_snapshot})
 
-        initial_cash = 100000.0
-        df['position'] = df['trade_qty'].where(is_trade, 0).cumsum()
-        df['cash'] = initial_cash + df['cash_flow'].where(is_trade, 0).cumsum()
-        df['equity'] = df['cash'] + df['position'] * df['close']
+        self.equity = pd.DataFrame(equity_curve).set_index("timestamp")
+        trades_df = pd.DataFrame(self.trades)
+        return self.equity, trades_df
 
-        trades_df = df.loc[is_trade].copy()
-        trades_df.rename(columns={'trade_qty': 'qty', 'exec_price': 'price'}, inplace=True)
-        trades_df['timestamp'] = trades_df.index
-        trades_df['cash_after'] = trades_df['cash']
-        trades_df['position_after'] = trades_df['position']
-        trades_df = trades_df[['timestamp', 'qty', 'price', 'notional', 'cash_after', 'position_after']]
-
-        equity_df = df[['equity', 'cash', 'position']].copy()
-        equity_df['timestamp'] = equity_df.index
-        equity_df = equity_df[['timestamp', 'equity', 'cash', 'position']]
-
-        returns = equity_df['equity'].pct_change().fillna(0.0)
-        avg_ret = float(returns.mean())
-        vol = float(returns.std())
-        sharpe = float((avg_ret / (vol + EPS)) * np.sqrt(252*24*60)) if vol > 0 else 0.0
-
+    def save_outputs(self, outdir: str | Path):
+        p = Path(outdir)
+        p.mkdir(parents=True, exist_ok=True)
+        self.equity.to_csv(p / "equity_curve.csv")
+        pd.DataFrame(self.trades).to_csv(p / "trades.csv", index=False)
+        # summary
         summary = {
-            'start_equity': float(equity_df['equity'].iloc[0]) if not equity_df.empty else 0.0,
-            'end_equity': float(equity_df['equity'].iloc[-1]) if not equity_df.empty else 0.0,
-            'total_trades': int(len(trades_df)),
-            'sharpe_minute_annualized_rough': sharpe
+            "initial_capital": self.cfg.initial_capital,
+            "n_trades": len(self.trades),
+            "final_equity": float(self.equity["equity"].iloc[-1]) if len(self.equity) else float(self.cfg.initial_capital)
         }
+        with open(p / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
 
-        return trades_df, equity_df, summary
+
+if __name__ == "__main__":
+    # quick local smoke runner if executed directly (for development)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data", required=True, help="cleaned BTCUSD_1min.csv")
+    parser.add_argument("--out", default="artifacts/backtest/default", help="output dir")
+    parser.add_argument("--capital", type=float, default=10000.0)
+    args = parser.parse_args()
+
+    df = pd.read_csv(args.data, parse_dates=["timestamp"])
+    # Ensure atr exists; simple fallback
+    if "atr" not in df.columns:
+        df["returns"] = np.log(df["close"]).diff().fillna(0)
+        df["atr"] = df["returns"].rolling(14).std().fillna(0) * df["close"]
+
+    cfg = BacktestConfig(initial_capital=args.capital)
+    bt = Backtester(df, cfg)
+    equity, trades = bt.run()
+    bt.save_outputs(args.out)

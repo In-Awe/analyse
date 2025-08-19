@@ -1,42 +1,31 @@
-# Backtesting & Phase IV — Vectorized Backtester (phenol Phase 4 scaffold)
+# Phase IV — Backtesting & Robustness
 
-This module provides a vectorized backtester skeleton and a smoke CI workflow.
+This document explains the basic backtesting runner added in `src/backtest` and how to run the smoke tests.
 
-Files added:
-- `src/backtest/backtester.py` — vectorized backtester (pandas).
-- `scripts/run_backtest.py` — CLI runner for local/backtest runs.
-- `configs/trade_logic.yaml` — default config for fees/slippage/execution.
-- `.github/workflows/backtest_smoke.yml` — smoke GitHub Action.
+## Files added
+- `src/backtest/backtester.py` — minimal vectorized engine, execution at next bar open + slippage, fee model.
+- `src/backtest/metrics.py` — Sharpe, Sortino, MDD, Profit Factor, Win Rate helpers.
+- `src/backtest/robustness.py` — Monte Carlo reshuffle and noise-addition tests.
+- `scripts/run_backtest.py` — CLI to run the backtest using `configs/backtest.yaml`.
+- `configs/backtest.yaml` — default backtest + robustness parameters.
 
-Outputs:
-- `artifacts/backtest/equity_curve.csv`
-- `artifacts/backtest/trades.csv`
-- `artifacts/backtest/summary.json`
-
-Execution (local):
+## Run a smoke backtest
+1. Ensure `data/cleaned/BTCUSD_1min.cleaned.csv` exists (Phase I produces this).
+2. From repo root:
 ```bash
-pip install -r requirements-backtest.txt
-python scripts/run_backtest.py --input /data/cleaned/BTCUSD_1min.cleaned.csv --outdir artifacts/backtest/run_YYYYMMDD_HHMM
+python -m scripts.run_backtest --data data/cleaned/BTCUSD_1min.cleaned.csv --out artifacts/backtest/run1
 ```
+3. Outputs:
+ - `artifacts/backtest/run1/equity_curve.csv`
+ - `artifacts/backtest/run1/trades.csv`
+ - `artifacts/backtest/run1/summary.json`
 
-Notes:
+## Robustness
+Use `src/backtest/robustness.py` to:
+ - produce Monte Carlo reshuffle statistics over per-trade P&L (requires trades.csv with 'pnl' column).
+ - run noise trials against the price series and produce stability metrics.
 
-The backtester assumes minute OHLCV and uses the next-bar open as base execution price,
-with configurable slippage = alpha * ATR_next_bar.
-
-Fees are applied per trade (maker/taker). Execution mode and min_notional are configurable.
-
-This is a skeleton suitable for extension: Monte Carlo reshuffles, walk-forward loops,
-parameter sweeps, and more robust slippage/limit-order filling models should be added next.
-
-
----
-
-### `requirements-backtest.txt`
-
-
-pandas>=2.0
-numpy>=1.25
-pyyaml
-scipy
-statsmodels
+## Next steps (suggested)
+1. Hook unit tests around the replay smoke to ensure end-to-end path (not included in patch).
+2. Fill the `signal` column using the Phase III model artifact and run OOS/walk-forward harness.
+3. Add trade-level pnl calculation to `backtester` (currently skeletoned as list entries) and expose more realistic slippage/limit simulation when tick-level data is available.
