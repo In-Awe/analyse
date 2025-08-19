@@ -33,7 +33,7 @@ if [ "${SMOKE}" = true ]; then
   else
     # fallback: try existing top-level script if present
     if [ -f scripts/run_backtest.py ]; then
-      python scripts/run_backtest.py --config configs/backtest_phase4.yaml --out "${ARTIFACT_DIR}" || echo "smoke_backtest_failed" > "${ARTIFACT_DIR}/smoke_error.txt"
+      python scripts/run_backtest.py --data data/cleaned/BTCUSD_1min.cleaned.csv --config configs/backtest.yaml --out "${ARTIFACT_DIR}" || echo "smoke_backtest_failed" > "${ARTIFACT_DIR}/smoke_error.txt"
     else
       echo "No backtest runner found (expected src.backtest or scripts/run_backtest.py)" > "${ARTIFACT_DIR}/smoke_error.txt"
     fi
@@ -44,8 +44,8 @@ fi
 if [ "${ROBUST}" = true ]; then
   echo "Running short robustness analysis..."
   # If a robustness runner exists, call it with reduced sample sizes
-  if [ -f scripts/robustness_runner.py ]; then
-    python scripts/robustness_runner.py --out "${ARTIFACT_DIR}" --mc-iterations 100 --noise-trials 5 || echo "robustness_failed" > "${ARTIFACT_DIR}/robustness_error.txt"
+  if [ -f scripts/run_robustness.py ]; then
+    python scripts/run_robustness.py --out "${ARTIFACT_DIR}" --mc-iterations 100 --noise-trials 5 || echo "robustness_failed" > "${ARTIFACT_DIR}/robustness_error.txt"
   else
     echo "No robustness runner script found; skipping robustness step" > "${ARTIFACT_DIR}/robustness_skipped.txt"
   fi

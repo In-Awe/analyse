@@ -147,6 +147,7 @@ class Backtester:
                     "delta_qty": delta_qty,
                     "position_qty": position_qty,
                     "fee": fee,
+                    "pnl": pnl,
                     "equity": equity
                 })
 
