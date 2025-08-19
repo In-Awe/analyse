@@ -1,0 +1,20 @@
+# Trade logic + backtest defaults
+fees:
+  maker: 0.0002   # 0.02%
+  taker: 0.0004   # 0.04%
+
+slippage:
+  alpha: 0.5      # execution price = next_open + alpha * ATR_next
+
+execution:
+  mode: "long-only" # long-only | long-short
+  min_notional: 10.0
+
+backtest:
+  signal_to_position:
+    BUY: 1
+    SELL: -1
+    FLAT: 0
+
+logging:
+  level: INFO

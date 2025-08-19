@@ -1,0 +1,35 @@
+name: Backtest smoke
+
+on:
+  push:
+    branches:
+      - feat/backtest-phase4
+  pull_request:
+    branches:
+      - feat/backtest-phase4
+
+jobs:
+  backtest-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-backtest.txt
+
+      - name: Run smoke backtest
+        run: |
+          python scripts/run_backtest.py --sample --outdir artifacts/backtest/smoke_run
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-smoke-artifacts
+          path: artifacts/backtest/smoke_run
