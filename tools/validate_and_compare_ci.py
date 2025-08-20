@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Reuse the project metric calculator if available.
 # It should provide: compute_metrics_from_equity(equity_csv: str, trades_csv: Optional[str]) -> Dict[str, float]

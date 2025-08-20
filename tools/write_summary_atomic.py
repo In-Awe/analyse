@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
+tools/write_summary_atomic.py
+
 Write (or rewrite) summary.json atomically for every discovered equity_curve.csv
 under artifacts/**.
+
+This file exposes a small programmatic API (write_summary_for_equity) so other
+scripts can call it directly after running a backtest.
 
 Why this exists:
   - Some sandboxes/overlays buffer or lose small files written late in a run.
@@ -16,11 +21,13 @@ from pathlib import Path
 from typing import Optional, Dict
 import sys
 
+# Try to import compute helper (existing in repo)
 try:
+    # compute_metrics_from_equity(equity_csv: str, trades_csv: Optional[str]) -> Dict[str, float]
     from tools.validate_metrics import compute_metrics_from_equity
 except Exception as e:
-    print("ERROR: tools.validate_metrics not importable. Ensure it exists and is installable.", file=sys.stderr)
-    raise
+    # If module import fails, provide a clear message when the script is executed.
+    compute_metrics_from_equity = None  # type: ignore
 
 def _atomic_write_json(path: Path, data: Dict) -> None:
     """
@@ -40,9 +47,37 @@ def _atomic_write_json(path: Path, data: Dict) -> None:
     os.replace(tmp, path)
 
 def _compute_summary(equity_csv: Path, trades_csv: Optional[Path]) -> Dict:
+    if compute_metrics_from_equity is None:
+        raise RuntimeError("compute_metrics_from_equity not available; ensure tools/validate_metrics.py is on PYTHONPATH")
     return compute_metrics_from_equity(str(equity_csv), str(trades_csv) if trades_csv and trades_csv.exists() else None)
 
+def write_summary_for_equity(equity_csv_path: str | Path, trades_csv_path: Optional[str | Path] = None) -> Path:
+    """
+    Compute metrics for a given equity_curve.csv and write summary.json next to it atomically.
+    Returns the Path of the written summary.json.
+
+    equity_csv_path: path to equity_curve.csv
+    trades_csv_path: optional path to trades.csv (if not provided, sibling trades.csv will be used if present)
+    """
+    equity = Path(equity_csv_path)
+    if not equity.exists():
+        raise FileNotFoundError(f"Equity file not found: {equity}")
+    trades = Path(trades_csv_path) if trades_csv_path else equity.parent / "trades.csv"
+    metrics = _compute_summary(equity, trades if trades.exists() else None)
+    summary = equity.parent / "summary.json"
+    _atomic_write_json(summary, metrics)
+    return summary
+
 def main() -> int:
+    """
+    CLI entrypoint. Scans artifacts/ for equity_curve.csv files and writes summary.json
+    next to each one. Returns exit code 0 on success.
+    """
+    if compute_metrics_from_equity is None:
+        print("ERROR: tools.validate_metrics.compute_metrics_from_equity not importable. "
+              "Ensure tools/validate_metrics.py is available and PYTHONPATH includes the repo root.", file=sys.stderr)
+        return 2
+
     artifacts = Path("artifacts")
     if not artifacts.exists():
         print("No artifacts/ directory found; nothing to do.")
