@@ -103,11 +103,13 @@ class VectorizedBacktester:
         fee_frac = self._effective_fee_frac()
         fees = qty * exec_price * fee_frac
 
-        # PnL from holding position: position_prev * change in price.
-        # This is a simplification that attributes PNL to the bar based on the position held at the start of the bar.
-        # A more precise calculation would account for intra-bar trades, but this is a major improvement.
+        # PnL is decomposed into holding PnL and trading PnL.
+        # Holding PnL: PnL from the position held at the start of the bar, marked to market.
+        # Trading PnL: PnL from the change in position during the bar.
         pnl_from_holding = df["pos_prev"] * (df["close"] - df["close"].shift(1))
-        minute_pnl = pnl_from_holding - fees.fillna(0)
+        pnl_from_trading = df["pos_change"] * (df["close"] - exec_price)
+        minute_pnl = pnl_from_holding.fillna(0) + pnl_from_trading.fillna(0) - fees.fillna(0)
+
         equity = equity_from_pnl(minute_pnl, initial_equity=initial_equity)
 
         # Aggregate trade-level pnl for summary: consider only non-zero pos_change rows
@@ -116,13 +118,19 @@ class VectorizedBacktester:
         trades["exec_price"] = exec_price[qty > 0]
         trades["fees"] = fees[qty > 0]
         trades["direction"] = trade_sign[qty > 0]
-        # For reporting, we'll use the minute_pnl of the bar where the trade occurred.
-        # This is an approximation but more indicative of trade profitability than cash flow.
+
+        # Trade PnL is the sum of minute-level PnLs over the lifetime of the trade.
+        # This requires a trade-closing logic which is complex in vectorized form.
+        # As a better approximation, we attribute the minute_pnl of the execution bar to the trade.
+        # Note: sum(trades.pnl) will not equal (final_equity - initial_equity) because of the
+        # PnL from holding positions on bars without trades. This is expected in this simplified model.
         trades["pnl"] = minute_pnl[qty > 0]
 
         # Metrics
-        minute_returns = minute_pnl / equity.shift(1).fillna(equity.iloc[0])
-        summary = summarize(equity, minute_returns, trades["pnl"])
+        # Prepend initial equity for correct return calculation
+        equity_with_initial = pd.concat([pd.Series([initial_equity], index=[df.index[0] - pd.Timedelta(minutes=1)]), equity])
+        minute_returns = minute_pnl / equity.shift(1).fillna(initial_equity)
+        summary = summarize(equity_with_initial, minute_returns, trades["pnl"])
 
         # Persist
         outdir = Path(self.cfg["paths"]["outputs_dir"])
@@ -135,6 +143,9 @@ class VectorizedBacktester:
             "pos_change": df["pos_change"],
             "exec_price": exec_price,
         }, index=df.index)
+        # Prepend initial equity to the CSV for correct downstream calculations
+        df_out.loc[df.index[0] - pd.Timedelta(minutes=1)] = [initial_equity, 0, 0, 0, 0, 0]
+        df_out = df_out.sort_index()
         df_out.to_csv(outdir / "equity_curve.csv")
         trades.to_csv(outdir / "trades.csv")
         (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
