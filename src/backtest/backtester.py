@@ -1,6 +1,8 @@
 from __future__ import annotations
 import math
 import json
+import os
+import traceback
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -146,8 +148,8 @@ class VectorizedBacktester:
         # Prepend initial equity to the CSV for correct downstream calculations
         df_out.loc[df.index[0] - pd.Timedelta(minutes=1)] = [initial_equity, 0, 0, 0, 0, 0]
         df_out = df_out.sort_index()
-        df_out.to_csv(outdir / "equity_curve.csv")
-        trades.to_csv(outdir / "trades.csv")
+
+        _save_backtest_outputs_safely(df_out, trades, out_dir=outdir)
         (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
         return {
             "equity_curve": df_out,
@@ -211,3 +213,65 @@ def load_signals(cfg: Dict, df: DataFrame) -> Series:
     sig[up] = "UP"
     sig[down] = "DOWN"
     return sig
+
+
+# --- START SNIPPET: ensure saving outputs & diagnostics ---
+def _save_backtest_outputs_safely(df_out: pd.DataFrame, trades: pd.DataFrame, out_dir: str | Path):
+    """
+    Robustly save equity curve and trades CSVs and a NaN diagnostics file.
+    Use this helper near the end of the backtest run to guarantee outputs are written.
+    """
+    out_path = Path(out_dir)
+    try:
+        out_path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        print(f"[BACKTEST-SAVE] FAILED to create out_dir {out_path}: {e}")
+        raise
+
+    # Convert index to ISO timestamp column for CSV readability
+    try:
+        df_to_save = df_out.copy()
+        # If index is datetime-like, move it to a column called 'timestamp'
+        if hasattr(df_to_save.index, "tz") or hasattr(df_to_save.index, "tzinfo") or pd.api.types.is_datetime64_any_dtype(df_to_save.index):
+            df_to_save = df_to_save.reset_index()
+            df_to_save.rename(columns={df_to_save.columns[0]: "timestamp"}, inplace=True)
+        else:
+            # ensure there is a timestamp column
+            if "timestamp" not in df_to_save.columns:
+                df_to_save = df_to_save.reset_index().rename(columns={df_to_save.columns[0]: "timestamp"})
+
+        # Exec price NaN handling: forward-fill then back-fill if necessary (do not mask results)
+        if "exec_price" in df_to_save.columns and df_to_save["exec_price"].isna().any():
+            print(f"[BACKTEST-SAVE] exec_price has NaNs: {df_to_save['exec_price'].isna().sum()} — will forward-fill then backfill before saving CSV.")
+            df_to_save["exec_price"] = df_to_save["exec_price"].ffill().bfill()
+
+        # Save equity curve CSV
+        equity_csv = out_path / "equity_curve.csv"
+        df_to_save.to_csv(equity_csv, index=False)
+        print(f"[BACKTEST-SAVE] Saved equity curve to {equity_csv} ({len(df_to_save)} rows).")
+
+        # Save NaN diagnostics if any NaNs remain
+        nans = df_to_save[df_to_save.isna().any(axis=1)]
+        if len(nans) > 0:
+            diag_csv = out_path / "df_out_nans.csv"
+            nans.to_csv(diag_csv, index=False)
+            print(f"[BACKTEST-SAVE] NaN diagnostics saved to {diag_csv} ({len(nans)} NaN rows).")
+        else:
+            print("[BACKTEST-SAVE] No NaNs remain in df_out after fill operations.")
+
+    except Exception as e:
+        print("[BACKTEST-SAVE] Exception while saving equity curve:", e)
+        traceback.print_exc()
+
+    # Save trades (force timestamp column too)
+    try:
+        trades_to_save = trades.copy()
+        if hasattr(trades_to_save.index, "tz") or pd.api.types.is_datetime64_any_dtype(trades_to_save.index):
+            trades_to_save = trades_to_save.reset_index().rename(columns={trades_to_save.columns[0]: "timestamp"})
+        trades_csv = out_path / "trades.csv"
+        trades_to_save.to_csv(trades_csv, index=False)
+        print(f"[BACKTEST-SAVE] Saved trades to {trades_csv} ({len(trades_to_save)} rows).")
+    except Exception as e:
+        print("[BACKTEST-SAVE] Exception while saving trades:", e)
+        traceback.print_exc()
+# --- END SNIPPET ---
