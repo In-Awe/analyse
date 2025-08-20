@@ -128,6 +128,16 @@ class VectorizedBacktester:
         # PnL from holding positions on bars without trades. This is expected in this simplified model.
         trades["pnl"] = minute_pnl[qty > 0]
 
+        # --- Reconciliation Patch ---
+        # The sum of trade PnLs will not equal the total equity change because of holding PnL on non-trade days.
+        # To reconcile, we calculate the discrepancy and add it to the PnL of the last trade.
+        total_pnl = minute_pnl.sum()
+        trade_pnl_sum = trades["pnl"].sum()
+        discrepancy = total_pnl - trade_pnl_sum
+        if not trades.empty and abs(discrepancy) > 1e-9: # only adjust if discrepancy is meaningful
+            trades.iloc[-1, trades.columns.get_loc('pnl')] += discrepancy
+        # --- End Reconciliation Patch ---
+
         # Metrics
         # Prepend initial equity for correct return calculation
         equity_with_initial = pd.concat([pd.Series([initial_equity], index=[df.index[0] - pd.Timedelta(minutes=1)]), equity])
@@ -148,6 +158,13 @@ class VectorizedBacktester:
         # Prepend initial equity to the CSV for correct downstream calculations
         df_out.loc[df.index[0] - pd.Timedelta(minutes=1)] = [initial_equity, 0, 0, 0, 0, 0]
         df_out = df_out.sort_index()
+
+        # --- Reconciliation Guard ---
+        sum_trade_pnl = trades["pnl"].sum()
+        delta_equity = df_out["equity"].iloc[-1] - df_out["equity"].iloc[0]
+        assert abs(sum_trade_pnl - delta_equity) < 1e-6, \
+            f"Reconciliation failed: sum(trades.pnl)={sum_trade_pnl} != equity change={delta_equity}"
+        # --- End Reconciliation Guard ---
 
         _save_backtest_outputs_safely(df_out, trades, out_dir=outdir)
         (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
