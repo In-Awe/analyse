@@ -1,0 +1,13 @@
+{
+  "timestamp_utc": "2025-08-20T00:37:36.270645",
+  "input_size": 55,
+  "seq_len": 60,
+  "hidden_size": 64,
+  "num_layers": 1,
+  "dropout": 0.1,
+  "num_classes": 3,
+  "optimizer": "adam",
+  "learning_rate": 0.001,
+  "batch_size": 64,
+  "training_epochs": 5
+}

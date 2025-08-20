@@ -1,2 +1,13 @@
-threshold: 0.0005
-classes: [UP, DOWN, SIDEWAYS]
+# Target Variable Configuration
+target:
+  # horizon for calculating the future return
+  horizon_minutes: 5
+  # threshold for defining UP/DOWN classes (symmetric)
+  tau: 0.0005 # 0.05%
+  # class labels
+  classes: ["UP", "DOWN", "SIDEWAYS"]
+  # Data splitting configuration
+  splits:
+    train_frac: 0.70
+    val_frac: 0.15
+    # test_frac is implicitly 1.0 - train_frac - val_frac

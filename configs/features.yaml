@@ -1,11 +1,33 @@
 # Feature Engineering Configuration
 technical_indicators:
-  sma:
-    periods: [10, 30, 60]
-  rsi:
-    periods: [14]
-  atr:
-    periods: [14]
+  sma: [10, 20, 50, 100, 200]
+  ema: [10, 20, 50, 100, 200]
+  macd:
+    - fast: 12
+      slow: 26
+      signal: 9
+  rsi: [14, 28]
+  atr: [14, 28]
+  bollinger:
+    - window: 20
+      ndev: 2
+    - window: 50
+      ndev: 2.5
+
 microstructure:
   vwap:
-    windows: [60]
+    windows: [10, 30, 60, 120]
+  vvr:
+    window: 30
+  vol_of_vol:
+    window: 120
+  candle_morphology: True
+  vol_price_corr:
+    window: 60
+
+interaction_features:
+  enabled: True
+  combos:
+    - ["sma_10", "rsi_14"]
+    - ["ema_50", "atr_14"]
+    - ["vwap_60", "vol_of_vol"]

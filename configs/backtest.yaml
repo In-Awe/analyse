@@ -1,9 +1,50 @@
+# Backtesting Configuration
+paths:
+  # path to cleaned data (input for backtest)
+  cleaned_csv: "data/cleaned/BTCUSD_1min.cleaned.csv"
+  # path to features (for model-based signals)
+  features_parquet: "data/features/features_with_target.parquet"
+  # path to the trained model artifact to use for signal generation
+  model_artifact: "artifacts/experiments/xgb_run1/xgb_model.json"
+  # directory to save backtest outputs (equity curve, trades, summary)
+  outputs_dir: "artifacts/backtest/run1"
+
+# Initial capital for the backtest simulation
 initial_capital: 10000.0
-fee_maker: 0.0002
-fee_taker: 0.0004
-slippage_alpha: 0.5
-min_notional: 10.0
-execution: "next_open"
+
+# Execution settings
+execution:
+  # price at which to fill orders ('next_open' or 'close')
+  fill_on: "next_open"
+  # tick size for the instrument
+  tick_size: 0.1
+  # lot size for the instrument
+  lot_size: 0.001
+
+# Fee structure (in basis points)
+fees:
+  # which fee to apply ('maker' or 'taker')
+  side: "taker"
+  maker_bps: 2.0
+  taker_bps: 4.0
+
+# Slippage model
+slippage:
+  # 'next_open' (no explicit slippage) or 'atr'
+  model: "atr"
+  # multiplier for ATR-based slippage (e.g., price +/- alpha * ATR)
+  alpha: 0.5
+
+# Positioning logic
+positioning:
+  # target position size as a fraction of portfolio equity for each signal
+  up: 1.0      # full long
+  down: -1.0   # full short
+  sideways: 0.0 # flat
+  # minimum notional value for a trade in USD
+  min_notional_usd: 10.0
+
+# For robustness checks (from robustness.py)
 robustness:
   reshuffles: 2000
   noise:
