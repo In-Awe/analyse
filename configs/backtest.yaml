@@ -5,7 +5,7 @@ paths:
   # path to features (for model-based signals)
   features_parquet: "data/features/features_with_target.parquet"
   # path to the trained model artifact to use for signal generation
-  model_artifact: "artifacts/experiments/xgb_run1/xgb_model.json"
+  model_artifact: "artifacts/models/xgb_smoke/xgb_model.json"
   # directory to save backtest outputs (equity curve, trades, summary)
   outputs_dir: "artifacts/backtest/run1"
 

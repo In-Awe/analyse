@@ -159,8 +159,9 @@ def load_cfg(path: str) -> Dict:
         return yaml.safe_load(f)
 
 def load_cleaned(csv_path: str) -> DataFrame:
-    df = pd.read_csv(csv_path, parse_dates=["timestamp"])
-    df = df.set_index("timestamp").sort_index()
+    df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
+    df.index.name = "timestamp"
+    df = df.sort_index()
     # sanity columns
     needed = ["open","high","low","close","volume"]
     for c in needed:
