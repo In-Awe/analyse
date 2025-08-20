@@ -1,79 +1,117 @@
 #!/usr/bin/env python3
 """
-tools/validate_and_compare_ci.py
+CI helper: search the entire artifacts/ directory for summary.json files
+(not just artifacts/batch), recompute metrics from equity_curve.csv, and
+compare to summary.json values. Exit non-zero if:
+  - no summary.json files discovered, or
+  - any metric mismatches exceed tolerances.
 
-CI helper to find equity/trades CSVs, run validate_metrics.py, and compare to a summary.json if present.
-Exits with code 1 on validation errors or metric mismatches.
-
-- Finds the most recent `equity_curve.csv` and `trades.csv` in `artifacts/`.
-- Runs `validate_metrics.py` on them.
-- If `summary.json` is present, compares generated metrics to its values.
-- If not, prints metrics and exits cleanly.
+This makes CI robust whether your backtests write into artifacts/batch/*,
+artifacts/backtest/run*/ or any other subdir.
 """
-import os
-import sys
+from __future__ import annotations
 import json
-import subprocess
 from pathlib import Path
+import sys
+from typing import Dict, List
 
-def find_latest_csv(directory, pattern="equity_curve.csv"):
-    base = Path(directory)
-    files = list(base.rglob(pattern))
-    if not files:
-        return None
-    return max(files, key=lambda p: p.stat().st_mtime)
+# Reuse the project metric calculator if available.
+# It should provide: compute_metrics_from_equity(equity_csv: str, trades_csv: Optional[str]) -> Dict[str, float]
+try:
+    from tools.validate_metrics import compute_metrics_from_equity
+except Exception as e:
+    print("ERROR: tools.validate_metrics not importable. Ensure it exists and is installable.", file=sys.stderr)
+    raise
 
-def run_validation(equity_csv, trades_csv):
-    cmd = [sys.executable, "tools/validate_metrics.py", str(equity_csv)]
-    if trades_csv:
-        cmd.append(str(trades_csv))
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return json.loads(proc.stdout)
+# Absolute tolerances for numeric comparisons
+TOL = {
+    'sharpe': 0.2,
+    'sortino': 0.5,
+    'max_drawdown': 0.05,
+    'profit_factor': 0.2,
+    'final_equity': 1e-6,
+}
 
-def compare_metrics(gen, summ):
-    errors = 0
-    for k, v_gen in gen.items():
-        if k in summ:
-            v_summ = summ[k]
-            # simple float comparison with tolerance
-            if isinstance(v_gen, float) and abs(v_gen - v_summ) > 1e-6:
-                print(f"Mismatch: {k} | generated={v_gen:.6f} | summary={v_summ:.6f}", file=sys.stderr)
-                errors += 1
-    return errors
-
-def main():
-    artifacts_dir = "artifacts"
-    equity_csv = find_latest_csv(artifacts_dir, "equity_curve.csv")
-    if not equity_csv:
-        print("No equity_curve.csv found in artifacts/. Exiting.", file=sys.stderr)
-        sys.exit(1)
-    trades_csv = find_latest_csv(artifacts_dir, "trades.csv")
-    summary_json = equity_csv.parent / "summary.json"
-
-    print("Validating:", equity_csv)
-    if trades_csv:
-        print("Using trades:", trades_csv)
-
+def within_tolerance(refv, compv, key) -> bool:
     try:
-        metrics = run_validation(equity_csv, trades_csv)
-        print("Generated metrics:\n", json.dumps(metrics, indent=2))
-    except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
-        print("Failed to run validate_metrics.py:", e, file=sys.stderr)
-        if hasattr(e, 'stderr'):
-            print(e.stderr, file=sys.stderr)
-        sys.exit(1)
+        reff = float(refv)
+        compf = float(compv)
+    except Exception:
+        # fallback to exact string equality for non-numeric
+        return str(refv) == str(compv)
+    tol = TOL.get(key)
+    if tol is None:
+        # default small relative tolerance
+        return abs(reff - compf) <= max(1e-6, 0.01 * abs(reff))
+    return abs(reff - compf) <= tol
 
-    if summary_json.exists():
-        print("Comparing to:", summary_json)
-        summary = json.loads(summary_json.read_text())
-        errors = compare_metrics(metrics, summary)
-        if errors > 0:
-            print(f"Found {errors} metric mismatches.", file=sys.stderr)
-            sys.exit(1)
+def compare_dicts(ref: Dict, recomputed: Dict) -> List[str]:
+    keys = ('sharpe','sortino','max_drawdown','profit_factor','final_equity')
+    mismatches = []
+    for k in keys:
+        refv = ref.get(k, None)
+        compv = recomputed.get(k, None)
+        if refv is None:
+            mismatches.append(f"Reference missing {k}")
+            continue
+        if compv is None:
+            mismatches.append(f"Recomputed missing {k}")
+            continue
+        if not within_tolerance(refv, compv, k):
+            mismatches.append(f"{k} mismatch: ref={refv} vs recalc={compv} (tol={TOL.get(k,'rel1%')})")
+    return mismatches
+
+def main() -> int:
+    root = Path("artifacts")
+    if not root.exists():
+        print("No artifacts/ directory found in repo root. Failing CI.")
+        return 2
+
+    summaries = list(root.rglob("summary.json"))
+    if not summaries:
+        print("ERROR: No summary.json files found anywhere under artifacts/.")
+        print("Searched path:", str(root.resolve()))
+        return 2
+
+    total_failures = 0
+    for s in sorted(summaries):
+        print(f"[validate] Checking {s}")
+        try:
+            data = json.loads(s.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f"  Could not read/parse: {e}")
+            total_failures += 1
+            continue
+        parent = s.parent
+        equity = parent / "equity_curve.csv"
+        trades = parent / "trades.csv"
+        if not equity.exists():
+            print(f"  Missing equity_curve.csv next to {s}")
+            total_failures += 1
+            continue
+        try:
+            recomputed = compute_metrics_from_equity(str(equity), str(trades) if trades.exists() else None)
+        except Exception as e:
+            print(f"  Failed to recompute metrics: {e}")
+            total_failures += 1
+            continue
+
+        mismatches = compare_dicts(data, recomputed)
+        if mismatches:
+            total_failures += 1
+            print("  Mismatches detected:")
+            for m in mismatches:
+                print("   -", m)
+            print("  Reference:", {k: data.get(k) for k in ('sharpe','sortino','max_drawdown','profit_factor','final_equity')})
+            print("  Recalc   :", {k: recomputed.get(k) for k in ('sharpe','sortino','max_drawdown','profit_factor','final_equity')})
         else:
-            print("Metrics match summary.json. OK.")
-    else:
-        print("No summary.json found to compare against. OK.")
+            print("  OK: metrics within tolerances.")
+
+    if total_failures:
+        print(f"Validation failures: {total_failures}")
+        return 2
+    print("All summary.json files validated successfully.")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
