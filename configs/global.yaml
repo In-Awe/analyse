@@ -1,0 +1,4 @@
+# Global gating & safety config
+TRAINING_ENABLED: false    # Must be set to true only after human approval.
+ALLOW_PAPER_TRADING: false
+HUMAN_APPROVAL_TOKEN: ""    # Stored securely in vault; empty by default.

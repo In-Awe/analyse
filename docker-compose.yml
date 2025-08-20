@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 services:
   trading-bot:
     build: .
@@ -6,3 +6,17 @@ services:
       - ENVIRONMENT=production
     volumes:
       - ./data:/app/data
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: analyse
+      POSTGRES_PASSWORD: analysepass
+      POSTGRES_DB: analyse_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:

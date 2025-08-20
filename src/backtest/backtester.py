@@ -175,7 +175,11 @@ class VectorizedBacktester:
         # --- End Reconciliation Guard ---
 
         _save_backtest_outputs_safely(df_out, trades, out_dir=outdir)
-        (outdir / "summary.json").write_text(json.dumps(summary, indent=2))
+        summary_path = outdir / "summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2))
+        if not summary_path.exists():
+            print(f"WARNING: summary.json could not be found at {summary_path} after write – this may be a sandbox issue.")
+
         return {
             "equity_curve": df_out,
             "trades": trades,
@@ -226,7 +230,7 @@ def load_signals(cfg: Dict, df: DataFrame) -> Series:
                     feat_path = Path(feat_path_str)
                     if feat_path.exists():
                         feats = pd.read_parquet(feat_path)
-                        feats = feats.reindex(df.index).fillna(method="ffill").fillna(0.0)
+                        feats = feats.reindex(df.index).ffill().fillna(0.0)
 
                         target_cfg = cfg.get("target", {})
                         if "classes" in target_cfg:
