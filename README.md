@@ -1,7 +1,26 @@
-# Analyse — Phase V additions
+# Analyse
 
-This patch adds Phase V architecture docs and skeleton module implementations for local replay testing and CI smoke tests.
+## Phase 5 – Batch Testing
 
-Apply with: git apply phase5_patch.patch && git add . && git commit -m "feat(phase5): add skeletons"
+### Adding Raw Data
+Place Binance-style CSVs into `data/raw/`:
 
---
+```
+BTCUSDT_1m_2025-07.csv
+ETHUSDT_1m_2025-07.csv
+...
+```
+
+### Catalog Raw Files
+Run:
+```
+python scripts/catalog_raw_files.py
+```
+This generates `data/raw/manifest.csv` listing all available (symbol, year-month) pairs.
+
+### Run Batch Smoke Tests
+Run:
+```
+python scripts/run_batch_smoke.py --limit 2
+```
+to process two files, or `--all` to process all.

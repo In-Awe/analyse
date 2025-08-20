@@ -32,3 +32,9 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Data and artifacts
+data/cleaned/
+data/features/
+data/targets/
+artifacts/
