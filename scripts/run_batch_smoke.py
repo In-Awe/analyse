@@ -2,6 +2,7 @@ import os
 import csv
 import argparse
 import subprocess
+import yaml
 
 RAW_DIR = "data/raw"
 MANIFEST = os.path.join(RAW_DIR, "manifest.csv")
@@ -9,7 +10,7 @@ MANIFEST = os.path.join(RAW_DIR, "manifest.csv")
 
 def run_pipeline(entry, outdir):
     """
-    Runs clean -> feature -> target -> backtest for a single CSV.
+    Runs clean -> feature -> backtest for a single CSV.
     Assumes existing CLI scripts handle these steps.
     """
     fname = entry["filename"]
@@ -19,12 +20,13 @@ def run_pipeline(entry, outdir):
     print(f"\n[RUN] {symbol} {ym} ({fname})")
     os.makedirs(outdir, exist_ok=True)
 
-    # Adjust to actual pipeline entry points as needed
+    cleaned_csv_path = os.path.join(outdir, "cleaned.csv")
+    features_path = os.path.join(outdir, "features.parquet")
+    imputation_log_path = os.path.join(outdir, "imputation_log.csv")
+
     cmds = [
-        ["python", "scripts/run_clean.py", "--input", os.path.join(RAW_DIR, fname), "--outdir", outdir],
-        ["python", "scripts/run_features.py", "--indir", outdir, "--outdir", outdir],
-        ["python", "scripts/run_target.py", "--indir", outdir, "--outdir", outdir],
-        ["python", "scripts/run_backtest.py", "--indir", outdir, "--outdir", outdir],
+        ["python", "scripts/clean_impute.py", "--input", os.path.join(RAW_DIR, fname), "--output-csv", cleaned_csv_path, "--output-log", imputation_log_path],
+        ["python", "scripts/build_features.py", "--input", cleaned_csv_path, "--out", features_path],
     ]
 
     for cmd in cmds:
@@ -34,6 +36,33 @@ def run_pipeline(entry, outdir):
         except subprocess.CalledProcessError as e:
             print("  !! Pipeline step failed:", e)
             return False
+
+    # Create custom config for backtest
+    try:
+        with open("configs/trade_logic.yaml") as f:
+            trade_logic_cfg = yaml.safe_load(f)
+    except FileNotFoundError:
+        print(" !! trade_logic.yaml not found, cannot run backtest")
+        return False
+
+    if 'paths' not in trade_logic_cfg or trade_logic_cfg['paths'] is None:
+        trade_logic_cfg['paths'] = {}
+
+    trade_logic_cfg['paths']['cleaned_csv'] = cleaned_csv_path
+    trade_logic_cfg['paths']['features_parquet'] = features_path
+    trade_logic_cfg['paths']['outputs_dir'] = outdir
+
+    custom_config_path = os.path.join(outdir, "trade_logic.yaml")
+    with open(custom_config_path, 'w') as f:
+        yaml.dump(trade_logic_cfg, f)
+
+    cmd_backtest = ["python", "scripts/run_backtest.py", "--config", custom_config_path]
+    print("  ->", " ".join(cmd_backtest))
+    try:
+        subprocess.check_call(cmd_backtest)
+    except subprocess.CalledProcessError as e:
+        print("  !! Pipeline step failed:", e)
+        return False
 
     return True
 

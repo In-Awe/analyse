@@ -28,14 +28,18 @@ class VectorizedBacktester:
         return bps / 1e4
 
     def _effective_fee_frac(self) -> float:
-        side = self.cfg["fees"]["side"]
+        fees_cfg = self.cfg.get("fees", {})
+        side = fees_cfg.get("side", "taker")
         if side == "maker":
-            return self._bps_to_frac(self.cfg["fees"]["maker_bps"])
-        return self._bps_to_frac(self.cfg["fees"]["taker_bps"])
+            return self._bps_to_frac(fees_cfg.get("maker_bps", 0.0))
+        return self._bps_to_frac(fees_cfg.get("taker_bps", 0.0))
 
     def _apply_slippage(self, df: DataFrame) -> Series:
-        mode = self.cfg["slippage"]["model"]
-        if self.cfg["execution"]["fill_on"] == "next_open":
+        slippage_cfg = self.cfg.get("slippage", {})
+        execution_cfg = self.cfg.get("execution", {})
+        mode = slippage_cfg.get("model", "next_open")
+
+        if execution_cfg.get("fill_on") == "next_open":
             price = df["open"].shift(-1)
         else:
             price = df["close"]
@@ -43,7 +47,7 @@ class VectorizedBacktester:
         if mode == "next_open":
             return price
         # ATR-based slip: price ± alpha * ATR_next
-        alpha = float(self.cfg["slippage"]["alpha"])
+        alpha = float(slippage_cfg.get("alpha", 0.0))
         if "atr" not in df.columns:
             # safe fallback
             return price
@@ -64,10 +68,14 @@ class VectorizedBacktester:
         df = df.copy()
         df["signal"] = signals.reindex(df.index).fillna("SIDEWAYS")
 
+        # --- Safe config access ---
+        positioning_cfg = cfg.get("positioning", {})
+        execution_cfg = cfg.get("execution", {})
+
         # Map signal -> target position
-        pos_map = {"UP": cfg["positioning"]["up"],
-                   "DOWN": cfg["positioning"]["down"],
-                   "SIDEWAYS": cfg["positioning"]["sideways"]}
+        pos_map = {"UP": positioning_cfg.get("up", 1.0),
+                   "DOWN": positioning_cfg.get("down", -1.0),
+                   "SIDEWAYS": positioning_cfg.get("sideways", 0.0)}
         df["target_pos"] = df["signal"].map(pos_map).fillna(0.0)
 
         # Position changes -> trades at next bar open (or configured)
@@ -75,9 +83,9 @@ class VectorizedBacktester:
         df["pos_change"] = df["target_pos"] - df["pos_prev"]
 
         # Notional sizing: 1 unit == 1 BTC equivalent; enforce min notional
-        tick_size = float(cfg["execution"]["tick_size"])
-        lot_size = float(cfg["execution"]["lot_size"])
-        min_notional = float(cfg["positioning"]["min_notional_usd"])
+        tick_size = float(execution_cfg.get("tick_size", 0.01))
+        lot_size = float(execution_cfg.get("lot_size", 0.001))
+        min_notional = float(positioning_cfg.get("min_notional_usd", 1.0))
 
         # Fill price & potential ATR slip
         slip = self._apply_slippage(df)
@@ -145,7 +153,7 @@ class VectorizedBacktester:
         summary = summarize(equity_with_initial, minute_returns, trades["pnl"])
 
         # Persist
-        outdir = Path(self.cfg["paths"]["outputs_dir"])
+        outdir = Path(self.cfg.get("paths", {}).get("outputs_dir", "artifacts/backtest/run_default"))
         outdir.mkdir(parents=True, exist_ok=True)
         df_out = pd.DataFrame({
             "equity": equity,
@@ -203,22 +211,32 @@ def load_signals(cfg: Dict, df: DataFrame) -> Series:
     Phase IV runs on the selected model artifact from Phase III.
     If unavailable, fall back to a transparent heuristic: UP when 10-30 EMA diff positive and ATR regime low.
     """
-    model_path = Path(cfg["paths"]["model_artifact"])
-    if model_path.exists():
-        try:
-            import joblib
-            model = joblib.load(model_path)
-            # Expect a features parquet aligned to df index (Phase II)
-            feat_path = Path(cfg["paths"]["features_parquet"])
-            if feat_path.exists():
-                feats = pd.read_parquet(feat_path)
-                feats = feats.reindex(df.index).fillna(method="ffill").fillna(0.0)
-                proba = model.predict_proba(feats)  # class order assumed ["DOWN","SIDEWAYS","UP"]
-                labels = np.array(cfg["target"]["classes"])
-                preds = labels[np.argmax(proba, axis=1)]
-                return pd.Series(preds, index=df.index)
-        except Exception:
-            pass
+    paths_cfg = cfg.get("paths", {})
+    model_path_str = paths_cfg.get("model_artifact")
+
+    if model_path_str:
+        model_path = Path(model_path_str)
+        if model_path.exists():
+            try:
+                import joblib
+                model = joblib.load(model_path)
+
+                feat_path_str = paths_cfg.get("features_parquet")
+                if feat_path_str:
+                    feat_path = Path(feat_path_str)
+                    if feat_path.exists():
+                        feats = pd.read_parquet(feat_path)
+                        feats = feats.reindex(df.index).fillna(method="ffill").fillna(0.0)
+
+                        target_cfg = cfg.get("target", {})
+                        if "classes" in target_cfg:
+                            labels = np.array(target_cfg["classes"])
+                            proba = model.predict_proba(feats)
+                            preds = labels[np.argmax(proba, axis=1)]
+                            return pd.Series(preds, index=df.index)
+            except Exception:
+                pass # Fallback to heuristic
+
     # Heuristic fallback
     ema10 = df["close"].ewm(span=10, adjust=False).mean()
     ema30 = df["close"].ewm(span=30, adjust=False).mean()
