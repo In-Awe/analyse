@@ -103,18 +103,11 @@ class VectorizedBacktester:
         fee_frac = self._effective_fee_frac()
         fees = qty * exec_price * fee_frac
 
-        # PnL from holding position: position_prev * minute return on close-to-close
-        # We compute returns on close-to-close. Execution happens on next open -> entry at exec_price already handled in discrete trade PnL below.
-        close_ret = df["close"].pct_change().fillna(0.0)
-        minute_pnl_from_hold = df["pos_prev"] * df["close"].shift(1) * close_ret
-
-        # Trade PnL impact at the moment of position change (entry/exit/flip)
-        # For a position increase, we pay (qty * exec_price) + fees at t
-        # For a decrease, we receive (qty * exec_price) - fees at t
-        trade_cash_flow = -trade_sign * qty * exec_price - fees
-
-        # Total pnl per minute is holding pnl + trade cash flows
-        minute_pnl = minute_pnl_from_hold + trade_cash_flow.fillna(0.0)
+        # PnL from holding position: position_prev * change in price.
+        # This is a simplification that attributes PNL to the bar based on the position held at the start of the bar.
+        # A more precise calculation would account for intra-bar trades, but this is a major improvement.
+        pnl_from_holding = df["pos_prev"] * (df["close"] - df["close"].shift(1))
+        minute_pnl = pnl_from_holding - fees.fillna(0)
         equity = equity_from_pnl(minute_pnl, initial_equity=initial_equity)
 
         # Aggregate trade-level pnl for summary: consider only non-zero pos_change rows
@@ -123,14 +116,13 @@ class VectorizedBacktester:
         trades["exec_price"] = exec_price[qty > 0]
         trades["fees"] = fees[qty > 0]
         trades["direction"] = trade_sign[qty > 0]
-        # Approx trade PnL proxy: realized on flips/exits using next bar move; conservative but consistent
-        # Here we compute realized increments as change in position valued at execution price minus fees;
-        # further refinement could batch open/close legs, but Phase IV summary uses this stable proxy.
-        trades["trade_pnl"] = -trades["direction"] * trades["qty"] * trades["exec_price"] - trades["fees"]
+        # For reporting, we'll use the minute_pnl of the bar where the trade occurred.
+        # This is an approximation but more indicative of trade profitability than cash flow.
+        trades["pnl"] = minute_pnl[qty > 0]
 
         # Metrics
         minute_returns = minute_pnl / equity.shift(1).fillna(equity.iloc[0])
-        summary = summarize(equity, minute_returns, trades["trade_pnl"])
+        summary = summarize(equity, minute_returns, trades["pnl"])
 
         # Persist
         outdir = Path(self.cfg["paths"]["outputs_dir"])
