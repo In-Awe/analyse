@@ -39,6 +39,15 @@ jobs:
       # If your workflow runs a backtest step, place it above this point.
       # Otherwise, this job will only validate any pre-existing artifacts in the repo/CI run.
 
+      - name: Run backtest wrapper (if present)
+        run: |
+          if [ -f scripts/run_backtest_with_summary.py ]; then
+            echo "Found wrapper: running scripts/run_backtest_with_summary.py"
+            python scripts/run_backtest_with_summary.py || echo "Backtest wrapper exited non-zero, continuing to validation"
+          else
+            echo "No run_backtest_with_summary.py wrapper found; skipping."
+          fi
+
       - name: Run atomic summary writer (recreate any missing summaries)
         run: |
           python tools/write_summary_atomic.py

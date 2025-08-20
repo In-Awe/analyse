@@ -1,4 +1,7 @@
 # Trade Logic Configuration
+paths:
+  cleaned_csv: data/cleaned/BTCUSD_1min.cleaned.csv
+  outputs_dir: artifacts/backtest/run_default
 signal_mapping:
   UP:
     min_confidence: 0.7

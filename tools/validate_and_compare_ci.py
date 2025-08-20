@@ -15,6 +15,11 @@ from pathlib import Path
 import sys
 from typing import Dict, List, Optional
 
+# ensure repo root is on path for imports
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 # Reuse the project metric calculator if available.
 # It should provide: compute_metrics_from_equity(equity_csv: str, trades_csv: Optional[str]) -> Dict[str, float]
 try:
