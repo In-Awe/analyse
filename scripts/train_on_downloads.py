@@ -34,6 +34,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 import xgboost as xgb
 
+from scripts.model_registry import register_model
+
 # Optional torch import
 try:
     import torch
@@ -248,6 +250,7 @@ def run_training(raw_dir: str = RAW_DIR_DEFAULT, model_dir: str = MODEL_DIR_DEFA
                 lstm_path, lstm_metrics = train_lstm(df.copy(), pair_name, model_dir, run_id, seq_len=50, epochs=5)
                 if lstm_path:
                     write_model_metrics(Path(lstm_path), lstm_metrics)
+                    register_model(str(lstm_path), "LSTM", pair_name, get_git_sha(False), run_id, lstm_metrics)
                     results.append({"pair": pair_name, "model_type": "LSTM", "model_path": str(lstm_path), "metrics": lstm_metrics})
             else:
                 print(json.dumps({"event":"torch_missing", "pair": pair_name}))
@@ -255,6 +258,7 @@ def run_training(raw_dir: str = RAW_DIR_DEFAULT, model_dir: str = MODEL_DIR_DEFA
             xgb_path, xgb_metrics = train_xgb(df.copy(), pair_name, model_dir, run_id, n_estimators=50)
             if xgb_path:
                 write_model_metrics(Path(xgb_path), xgb_metrics)
+                register_model(str(xgb_path), "XGBoost", pair_name, get_git_sha(False), run_id, xgb_metrics)
                 results.append({"pair": pair_name, "model_type": "XGBoost", "model_path": str(xgb_path), "metrics": xgb_metrics})
             # update progress
             pct = float(idx) / float(total)

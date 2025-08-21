@@ -1,7 +1,7 @@
 # requirements-ml.txt
 # Pinned heavy ML dependencies for reproducible training runs.
 # NOTE: torch CPU wheel is installed from PyTorch's stable index in CI to avoid GPU wheels.
-torch==2.1.0+cpu
-xgboost==1.7.5
-scikit-learn==1.2.2
-dill==0.3.6
+torch==2.2.1+cpu
+xgboost==3.0.4
+scikit-learn==1.7.1
+dill==0.4.0

@@ -1,0 +1,25 @@
+# scripts/systemd/analyse-orchestrator.service
+# Template systemd unit for running the orchestrator on a machine.
+# Copy to /etc/systemd/system/analyse-orchestrator.service and edit ExecStart and User.
+# Example usage:
+# sudo cp scripts/systemd/analyse-orchestrator.service /etc/systemd/system/
+# sudo systemctl daemon-reload
+# sudo systemctl enable --now analyse-orchestrator.service
+
+[Unit]
+Description=Analyse orchestrator (download + training)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/analyse
+# Update ExecStart to the absolute path of your venv python and the orchestrator script
+ExecStart=/home/ubuntu/analyse/.venv/bin/python /home/ubuntu/analyse/scripts/run_download_and_train.py --symbols BTCUSDT --months 84 --out artifacts/raw --limit 2
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/ubuntu/analyse/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+[Install]
+WantedBy=multi-user.target

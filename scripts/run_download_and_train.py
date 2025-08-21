@@ -60,6 +60,10 @@ def main():
     parser.add_argument("--api_key", default="", help="Optional API key for Binance (not stored)")
     parser.add_argument("--out", default="artifacts/raw", help="Output directory for downloads")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of symbols training will process (0=no limit)")
+    parser.add_argument("--upload", action="store_true", help="Upload raw artifacts to S3 after run")
+    parser.add_argument("--bucket", default="", help="S3 bucket for upload")
+    parser.add_argument("--prefix", default="", help="S3 prefix for upload")
+    parser.add_argument("--upload-manifest", action="store_true", help="Generate and upload a manifest with artifacts")
     args = parser.parse_args()
 
     cfg = read_global_cfg()
@@ -118,6 +122,24 @@ def main():
             print("Failed to read training_summary.json:", e)
     else:
         print("No training_summary.json found in artifacts/training/.")
+
+    if args.upload:
+        if not args.bucket:
+            print("Error: --bucket is required for upload.")
+            return 1
+        print("Starting upload step...")
+        upload_cmd = [sys.executable, os.path.join(ROOT, "scripts", "upload_artifacts_s3.py"),
+                      "--src", args.out,
+                      "--bucket", args.bucket]
+        if args.prefix:
+            upload_cmd += ["--prefix", args.prefix]
+        if args.upload_manifest:
+            upload_cmd.append("--upload-manifest")
+
+        upload_rc = run_subprocess(upload_cmd, env=env)
+        if upload_rc != 0:
+            print("Upload script returned non-zero exit code.")
+            return upload_rc
 
     print("Orchestration complete.")
     return 0
