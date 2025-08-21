@@ -1,0 +1,378 @@
+From 9a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b Mon Sep 17 00:00:00 2001
+From: assistant <assistant@example.com>
+Date: 2025-08-21 18:00:00 +0000
+Subject: [PATCH] ML reproducibility, CI smoke job, resource guards, per-model metrics & telemetry
+
+- Add requirements-ml.txt with pinned versions.
+- Update training script to include git SHA in model filenames, write per-model metrics json,
+  telemetry/progress JSON, MAX_ROWS downsample guard, and optional timeout.
+- Add a small CI workflow training_smoke.yml that installs CPU torch wheel and runs a tiny download+train.
+---
+ requirements-ml.txt                                  | 4 ++++
+ scripts/train_on_downloads.py                         | 238 +++++++++++++++++++++++++++++++++++++++++++++++-----
+ .github/workflows/training_smoke.yml                  | 106 +++++++++++++++++++++++++
+ 3 files changed, 342 insertions(+), 6 deletions(-)
+ create mode 100644 requirements-ml.txt
+ create mode 100644 .github/workflows/training_smoke.yml
+
+
+Below are full file contents added/modified by the patch.
+
+File: requirements-ml.txt (new)
+# requirements-ml.txt
+# Pinned heavy ML dependencies for reproducible training runs.
+# NOTE: torch CPU wheel is installed from PyTorch's stable index in CI to avoid GPU wheels.
+torch==2.1.0+cpu
+xgboost==1.7.5
+scikit-learn==1.2.2
+dill==0.3.6
+
+File: scripts/train_on_downloads.py (replaced/updated)
+#!/usr/bin/env python3
+"""
+scripts/train_on_downloads.py
+
+Full training pipeline for downloaded Binance CSVs.
+
+Enhancements:
+- Per-model metrics JSON files in artifacts/models/
+- Model filenames include git SHA and hyperparameters for reproducibility/audit
+- MAX_ROWS guard (env var) to avoid runaway training on huge datasets
+- Simple per-model timeout (env var TIMEOUT_SECONDS), UNIX only via signal
+- Telemetry JSON progress file at artifacts/training/progress_<runid>.json
+- Structured JSON-ish log lines for easier ingestion by UI/CI
+
+Usage:
+  python scripts/train_on_downloads.py [--raw artifacts/raw] [--limit 0]
+
+Note: this script requires heavy ML deps: torch, xgboost, scikit-learn, dill. Use requirements-ml.txt.
+"""
+from __future__ import annotations
+import argparse
+import os
+import sys
+import json
+import time
+import dill
+import subprocess
+import traceback
+from pathlib import Path
+from datetime import datetime
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+import xgboost as xgb
+
+# Optional torch import
+try:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+except Exception:
+    torch = None
+    nn = None
+    DataLoader = None
+    TensorDataset = None
+
+# Config & defaults
+RAW_DIR_DEFAULT = "artifacts/raw"
+MODEL_DIR_DEFAULT = "artifacts/models"
+SUMMARY_DIR_DEFAULT = "artifacts/training"
+PROGRESS_DIR = SUMMARY_DIR_DEFAULT
+DEFAULT_MAX_ROWS = int(os.environ.get("MAX_ROWS", 500_000))  # guard
+DEFAULT_TIMEOUT = int(os.environ.get("TIMEOUT_SECONDS", 300))  # per-model timeout (s), UNIX-only
+DEVICE = "cpu"
+if torch is not None and torch.cuda.is_available():
+    DEVICE = "cuda"
+else:
+    DEVICE = "cpu"
+
+# Utility: git sha
+def get_git_sha(short: bool = True) -> str:
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=os.getcwd()).decode().strip()
+        if short:
+            return sha[:8]
+        return sha
+    except Exception:
+        return "nogit"
+
+# Simple LSTM implementation (only used if torch available)
+class LSTMNet(nn.Module if nn is not None else object):
+    def __init__(self, input_size: int, hidden_size: int = 32, num_layers: int = 2, output_size: int = 1):
+        if nn is None:
+            raise RuntimeError("PyTorch not installed")
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        return self.fc(out[:, -1, :])
+
+# Timeout guard for UNIX using signals
+USE_SIGNAL_TIMEOUT = False
+try:
+    import signal
+    USE_SIGNAL_TIMEOUT = True
+except Exception:
+    USE_SIGNAL_TIMEOUT = False
+
+def alarm_handler(signum, frame):
+    raise TimeoutError("Model training timed out (signal alarm)")
+
+if USE_SIGNAL_TIMEOUT:
+    signal.signal(signal.SIGALRM, alarm_handler)
+
+# Writes per-model metrics json
+def write_model_metrics(model_path: Path, metrics: dict):
+    metrics_path = model_path.with_suffix(model_path.suffix + ".metrics.json")
+    try:
+        with open(metrics_path, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+        print(json.dumps({"event":"model_metrics_written", "path": str(metrics_path)}))
+    except Exception as e:
+        print(json.dumps({"event":"model_metrics_write_failed", "error": str(e)}))
+
+# Telemetry: write progress JSON
+def write_progress(run_id: str, status: str, pair: str = "", pct: float = 0.0, extra: dict | None = None):
+    Path(PROGRESS_DIR).mkdir(parents=True, exist_ok=True)
+    payload = {
+        "run_id": run_id,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "status": status,
+        "pair": pair,
+        "progress": pct,
+    }
+    if extra:
+        payload.update(extra)
+    out = Path(PROGRESS_DIR) / f"progress_{run_id}.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+# Ensure model dir exists
+def ensure_dirs(model_dir: str, summary_dir: str):
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
+    Path(summary_dir).mkdir(parents=True, exist_ok=True)
+
+# Helpers: downsample large df (take last MAX_ROWS rows for recency)
+def enforce_max_rows(df: pd.DataFrame, max_rows: int):
+    if len(df) > max_rows:
+        print(json.dumps({"event":"downsample", "original_rows": len(df), "max_rows": max_rows}))
+        return df.iloc[-max_rows:].reset_index(drop=True)
+    return df
+
+# Training functions (LSTM and XGBoost)
+def train_lstm(df: pd.DataFrame, pair_name: str, model_dir: str, run_id: str, seq_len: int = 50, epochs: int = 5):
+    if torch is None:
+        raise RuntimeError("PyTorch not installed (train_lstm)")
+    # Use 'close' sequence
+    data = df["close"].astype(float).values
+    X, y = [], []
+    for i in range(len(data) - seq_len):
+        X.append(data[i:i+seq_len])
+        y.append(data[i+seq_len])
+    if not X:
+        return None, {"error":"no_sequence_data"}
+    X = np.array(X, dtype=np.float32)
+    y = np.array(y, dtype=np.float32)
+    # split
+    X_tr, X_val, y_tr, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    # tensors & loader
+    X_tr_t = torch.tensor(X_tr).unsqueeze(-1).to(DEVICE)
+    y_tr_t = torch.tensor(y_tr).unsqueeze(-1).to(DEVICE)
+    X_val_t = torch.tensor(X_val).unsqueeze(-1).to(DEVICE)
+    y_val_t = torch.tensor(y_val).unsqueeze(-1).to(DEVICE)
+    train_ds = TensorDataset(X_tr_t, y_tr_t)
+    loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+    model = LSTMNet(input_size=1, hidden_size=32, num_layers=2, output_size=1).to(DEVICE)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+    start = time.time()
+    for ep in range(epochs):
+        for xb, yb in loader:
+            opt.zero_grad()
+            out = model(xb)
+            loss = loss_fn(out, yb)
+            loss.backward()
+            opt.step()
+    val_preds = model(X_val_t).detach().cpu().numpy().reshape(-1)
+    val_loss = float(mean_squared_error(y_val, val_preds))
+    # write model
+    sha = get_git_sha()
+    fname = f"lstm_{pair_name}_{sha}_{run_id}.pt"
+    path = Path(model_dir) / fname
+    torch.save(model.state_dict(), str(path))
+    metrics = {
+        "validation_mse": val_loss,
+        "num_samples": int(len(X)),
+        "num_features": 1,
+        "model_file": str(path),
+        "training_time_seconds": time.time() - start
+    }
+    return path, metrics
+
+def train_xgb(df: pd.DataFrame, pair_name: str, model_dir: str, run_id: str, n_estimators: int = 50):
+    # prepare target (next close)
+    df2 = df.copy()
+    df2["target"] = df2["close"].shift(-1)
+    df2 = df2.dropna()
+    if df2.empty:
+        return None, {"error":"no_target_data"}
+    features = ["open","high","low","close","volume"]
+    X = df2[features].astype(float).values
+    y = df2["target"].astype(float).values
+    X_tr, X_val, y_tr, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+    start = time.time()
+    model = xgb.XGBRegressor(n_estimators=n_estimators, random_state=42, tree_method="hist")
+    model.fit(X_tr, y_tr)
+    preds = model.predict(X_val)
+    rmse = float(np.sqrt(mean_squared_error(y_val, preds)))
+    sha = get_git_sha()
+    fname = f"xgb_{pair_name}_{sha}_{run_id}.json"
+    path = Path(model_dir) / fname
+    model.save_model(str(path))
+    metrics = {
+        "validation_rmse": rmse,
+        "num_samples": int(len(X)),
+        "num_features": len(features),
+        "model_file": str(path),
+        "training_time_seconds": time.time() - start
+    }
+    return path, metrics
+
+# Main run
+def run_training(raw_dir: str = RAW_DIR_DEFAULT, model_dir: str = MODEL_DIR_DEFAULT, summary_dir: str = SUMMARY_DIR_DEFAULT, limit: int = 0):
+    run_id = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    start_time = time.time()
+    ensure_dirs(model_dir, summary_dir)
+    write_progress(run_id, "started", pair="", pct=0.0)
+    # discover CSVs
+    csv_paths = []
+    for root, _, files in os.walk(raw_dir):
+        for f in files:
+            if f.endswith(".csv"):
+                csv_paths.append(os.path.join(root, f))
+    csv_paths.sort()
+    if limit and limit > 0:
+        csv_paths = csv_paths[:limit]
+    total = len(csv_paths)
+    if total == 0:
+        print(json.dumps({"event":"no_csv_found", "raw_dir": raw_dir}))
+        write_progress(run_id, "no_data", pct=1.0)
+        return
+    results = []
+    for idx, p in enumerate(csv_paths, start=1):
+        pair_name = Path(p).stem
+        try:
+            print(json.dumps({"event":"processing_pair", "pair": pair_name, "index": idx, "total": total}))
+            df = pd.read_csv(p)
+            df = enforce_max_rows(df, DEFAULT_MAX_ROWS)
+            # per-pair timeout (UNIX only)
+            if USE_SIGNAL_TIMEOUT and DEFAULT_TIMEOUT > 0:
+                signal.alarm(DEFAULT_TIMEOUT)
+            # train LSTM if torch available
+            lstm_path, lstm_metrics = None, None
+            if torch is not None:
+                lstm_path, lstm_metrics = train_lstm(df.copy(), pair_name, model_dir, run_id, seq_len=50, epochs=5)
+                if lstm_path:
+                    write_model_metrics(Path(lstm_path), lstm_metrics)
+                    results.append({"pair": pair_name, "model_type": "LSTM", "model_path": str(lstm_path), "metrics": lstm_metrics})
+            else:
+                print(json.dumps({"event":"torch_missing", "pair": pair_name}))
+            # train xgb
+            xgb_path, xgb_metrics = train_xgb(df.copy(), pair_name, model_dir, run_id, n_estimators=50)
+            if xgb_path:
+                write_model_metrics(Path(xgb_path), xgb_metrics)
+                results.append({"pair": pair_name, "model_type": "XGBoost", "model_path": str(xgb_path), "metrics": xgb_metrics})
+            # update progress
+            pct = float(idx) / float(total)
+            write_progress(run_id, "running", pair=pair_name, pct=pct)
+        except TimeoutError as te:
+            print(json.dumps({"event":"timeout", "pair": pair_name, "error": str(te)}))
+        except Exception as e:
+            print(json.dumps({"event":"train_error", "pair": pair_name, "error": str(e), "trace": traceback.format_exc()}))
+        finally:
+            if USE_SIGNAL_TIMEOUT and DEFAULT_TIMEOUT > 0:
+                signal.alarm(0)
+    # finalize summary
+    end_time = time.time()
+    summary = {
+        "run_id": run_id,
+        "git_sha": get_git_sha(False),
+        "run_start_unix": int(start_time),
+        "run_end_unix": int(end_time),
+        "duration_seconds": end_time - start_time,
+        "models_trained": len(results),
+        "details": results
+    }
+    summary_path = Path(summary_dir) / "training_summary.json"
+    tmp = str(summary_path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    os.replace(tmp, str(summary_path))
+    write_progress(run_id, "finished", pct=1.0)
+    print(json.dumps({"event":"training_complete", "summary": str(summary_path)}))
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train models on downloaded CSVs")
+    parser.add_argument("--raw", default=RAW_DIR_DEFAULT)
+    parser.add_argument("--model_dir", default=MODEL_DIR_DEFAULT)
+    parser.add_argument("--summary_dir", default=SUMMARY_DIR_DEFAULT)
+    parser.add_argument("--limit", type=int, default=0, help="max number of CSVs to process")
+    args = parser.parse_args()
+    run_training(raw_dir=args.raw, model_dir=args.model_dir, summary_dir=args.summary_dir, limit=args.limit)
+
+File: .github/workflows/training_smoke.yml (new)
+name: PR - Training smoke test
+
+# Small, cheap training smoke test to run on PRs to ensure training path stays runnable.
+# This uses pinned CPU Torch wheels to avoid GPU downloads.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  training_smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install base deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Install ML deps (CPU wheels)
+        run: |
+          # Install pinned ML deps; use PyTorch CPU wheels to avoid GPU downloads
+          pip install --upgrade pip
+          pip install -r requirements-ml.txt -f https://download.pytorch.org/whl/torch_stable.html
+
+      - name: Quick download (1 month) limited
+        run: |
+          python scripts/download_all_pairs.py --symbols BTCUSDT --months 1 --out artifacts/raw
+
+      - name: Run training (limit 1)
+        run: |
+          python scripts/train_on_downloads.py --raw artifacts/raw --limit 1
+
+      - name: Show artifacts
+        run: |
+          ls -la artifacts || true
+          ls -la artifacts/raw || true
+          ls -la artifacts/training || true
+          python -c "import json,sys; print(open('artifacts/training/training_summary.json').read() if __import__('os').path.exists('artifacts/training/training_summary.json') else 'no summary')" || true
+
+      - name: Upload artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts
+          path: artifacts

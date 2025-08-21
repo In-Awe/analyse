@@ -1,0 +1,51 @@
+name: PR - Training smoke test
+
+# Small, cheap training smoke test to run on PRs to ensure training path stays runnable.
+# This uses pinned CPU Torch wheels to avoid GPU downloads.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  training_smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install base deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Install ML deps (CPU wheels)
+        run: |
+          # Install pinned ML deps; use PyTorch CPU wheels to avoid GPU downloads
+          pip install --upgrade pip
+          pip install -r requirements-ml.txt -f https://download.pytorch.org/whl/torch_stable.html
+
+      - name: Quick download (1 month) limited
+        run: |
+          python scripts/download_all_pairs.py --symbols BTCUSDT --months 1 --out artifacts/raw
+
+      - name: Run training (limit 1)
+        run: |
+          python scripts/train_on_downloads.py --raw artifacts/raw --limit 1
+
+      - name: Show artifacts
+        run: |
+          ls -la artifacts || true
+          ls -la artifacts/raw || true
+          ls -la artifacts/training || true
+          python -c "import json,sys; print(open('artifacts/training/training_summary.json').read() if __import__('os').path.exists('artifacts/training/training_summary.json') else 'no summary')" || true
+
+      - name: Upload artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts
+          path: artifacts
