@@ -32,7 +32,20 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
-import xgboost as xgb
+# --- Safe XGBoost import with fallback on macOS (Apple Silicon) ---
+try:
+    import xgboost as xgb
+except Exception as e:
+    xgb = None
+    print("=" * 60)
+    print("WARNING: XGBoost could not be imported.")
+    print("Error details:", e)
+    print()
+    print("👉 On macOS (M1/M2/M3/M4), this usually means the OpenMP runtime is missing.")
+    print("   Fix: run the following and then reinstall xgboost in your venv:")
+    print("       brew install libomp")
+    print("       pip install --force-reinstall xgboost")
+    print("=" * 60)
 
 from scripts.model_registry import register_model
 
@@ -186,6 +199,9 @@ def train_lstm(df: pd.DataFrame, pair_name: str, model_dir: str, run_id: str, se
     return path, metrics
 
 def train_xgb(df: pd.DataFrame, pair_name: str, model_dir: str, run_id: str, n_estimators: int = 50):
+    if xgb is None:
+        print(json.dumps({"event":"xgb_unavailable", "pair": pair_name, "message": "XGBoost not available, skipping training."}))
+        return None, {"error": "xgboost_not_available"}
     # prepare target (next close)
     df2 = df.copy()
     df2["target"] = df2["close"].shift(-1)
