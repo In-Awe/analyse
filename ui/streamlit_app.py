@@ -61,8 +61,9 @@ with col1:
     start_download = st.button("Start download")
 with col2:
     st.subheader("Training")
-    start_training = st.button("Start training simulation on downloaded data")
+    start_training = st.button("Start training on downloaded data")
     st.write("Training will process files in artifacts/raw and produce artifacts/training and artifacts/models.")
+    start_download_and_train = st.button("Download & Train (combined)")
 
 log_box = st.empty()
 log_q = queue.Queue()
@@ -114,6 +115,23 @@ if start_training and human_ok:
     t.start()
     stream_logs(log_q, placeholder)
     st.success("Training simulation completed (check artifacts/training and artifacts/models)")
+
+if start_download_and_train and human_ok:
+    st.info("Starting combined download + training orchestration...")
+    # build orchestrator command
+    symbols_arg = custom_symbols.strip()
+    sym_arg = f"--symbols {symbols_arg}" if symbols_arg else ""
+    top_arg = f"--top {top_n}" if top_n>0 else ""
+    cmd = f'python scripts/run_download_and_train.py {sym_arg} {top_arg} --months {months}'
+    if api_key:
+        cmd += f' --api_key \"{api_key}\"'
+    if limit>0:
+        cmd += f' --limit {limit}'
+    placeholder = log_box.empty()
+    t = threading.Thread(target=run_cmd_and_stream, args=(cmd, log_q))
+    t.start()
+    stream_logs(log_q, placeholder)
+    st.success("Download+Train orchestration complete. Check artifacts/training for training_summary.json")
 
 st.markdown("---")
 st.subheader("Artifacts quick links")

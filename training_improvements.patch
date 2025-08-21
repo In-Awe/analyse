@@ -1,3 +1,33 @@
+From 9a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b Mon Sep 17 00:00:00 2001
+From: assistant <assistant@example.com>
+Date: 2025-08-21 18:00:00 +0000
+Subject: [PATCH] ML reproducibility, CI smoke job, resource guards, per-model metrics & telemetry
+
+- Add requirements-ml.txt with pinned versions.
+- Update training script to include git SHA in model filenames, write per-model metrics json,
+  telemetry/progress JSON, MAX_ROWS downsample guard, and optional timeout.
+- Add a small CI workflow training_smoke.yml that installs CPU torch wheel and runs a tiny download+train.
+---
+ requirements-ml.txt                                  | 4 ++++
+ scripts/train_on_downloads.py                         | 238 +++++++++++++++++++++++++++++++++++++++++++++++-----
+ .github/workflows/training_smoke.yml                  | 106 +++++++++++++++++++++++++
+ 3 files changed, 342 insertions(+), 6 deletions(-)
+ create mode 100644 requirements-ml.txt
+ create mode 100644 .github/workflows/training_smoke.yml
+
+
+Below are full file contents added/modified by the patch.
+
+File: requirements-ml.txt (new)
+# requirements-ml.txt
+# Pinned heavy ML dependencies for reproducible training runs.
+# NOTE: torch CPU wheel is installed from PyTorch's stable index in CI to avoid GPU wheels.
+torch==2.1.0+cpu
+xgboost==1.7.5
+scikit-learn==1.2.2
+dill==0.3.6
+
+File: scripts/train_on_downloads.py (replaced/updated)
 #!/usr/bin/env python3
 """
 scripts/train_on_downloads.py
@@ -293,3 +323,56 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=0, help="max number of CSVs to process")
     args = parser.parse_args()
     run_training(raw_dir=args.raw, model_dir=args.model_dir, summary_dir=args.summary_dir, limit=args.limit)
+
+File: .github/workflows/training_smoke.yml (new)
+name: PR - Training smoke test
+
+# Small, cheap training smoke test to run on PRs to ensure training path stays runnable.
+# This uses pinned CPU Torch wheels to avoid GPU downloads.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  training_smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install base deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+
+      - name: Install ML deps (CPU wheels)
+        run: |
+          # Install pinned ML deps; use PyTorch CPU wheels to avoid GPU downloads
+          pip install --upgrade pip
+          pip install -r requirements-ml.txt -f https://download.pytorch.org/whl/torch_stable.html
+
+      - name: Quick download (1 month) limited
+        run: |
+          python scripts/download_all_pairs.py --symbols BTCUSDT --months 1 --out artifacts/raw
+
+      - name: Run training (limit 1)
+        run: |
+          python scripts/train_on_downloads.py --raw artifacts/raw --limit 1
+
+      - name: Show artifacts
+        run: |
+          ls -la artifacts || true
+          ls -la artifacts/raw || true
+          ls -la artifacts/training || true
+          python -c "import json,sys; print(open('artifacts/training/training_summary.json').read() if __import__('os').path.exists('artifacts/training/training_summary.json') else 'no summary')" || true
+
+      - name: Upload artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-artifacts
+          path: artifacts
